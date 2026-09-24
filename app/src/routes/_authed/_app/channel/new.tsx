@@ -48,6 +48,8 @@ function RouteComponent() {
   // Optimistic seed shown before the first channel record exists.
   const [sent, setSent] = useState<Message | null>(null);
 
+  const [additionalAgents, setAdditionalAgents] = useState<AgentProfile[]>([]);
+
   // Stale or private `?agent=` values are ignored because the roster is permission-filtered.
   const listed = profiles?.find((profile) => profile.id === agent);
   /**
@@ -67,6 +69,18 @@ function RouteComponent() {
     listed ??
     (fetched?.id === agent ? fetched : undefined) ??
     (agent ? undefined : defaultAgentProfile(profiles));
+
+  const allSelectedAgents = (() => {
+    const list: AgentProfile[] = [];
+    if (chosen) list.push(chosen);
+    for (const add of additionalAgents) {
+      if (!list.some((item) => item.id === add.id)) {
+        list.push(add);
+      }
+    }
+    return list;
+  })();
+
   const needsUrlAgentDetail =
     Boolean(agent) && profiles !== undefined && !listed;
   const waitingForUrlAgent =
@@ -78,68 +92,102 @@ function RouteComponent() {
       : urlAgentDetailFailed
         ? "Coworker couldn't be loaded."
         : null;
-  const recipients: Recipient[] = chosen
-    ? [{ id: chosen.id, name: chosen.name }]
-    : [];
+  const recipients: Recipient[] = allSelectedAgents.map((a) => ({
+    id: a.id,
+    name: a.name,
+  }));
   const skillCommands = useSkillCommands(chosen?.id ?? "");
 
   if (profiles === undefined && !rosterError) return null;
 
   return (
     <div className="flex h-full flex-col">
-      <div className="h-12 border-b border-border sticky top-0 flex flex-row px-2 items-center">
+      <div className="min-h-12 border-b border-border sticky top-0 flex flex-wrap px-2 py-1.5 items-center gap-1.5">
         <SidebarToggle className="mr-1" />
-        <span className="text-sm text-muted-foreground">To:</span>
-        <Combobox
-          // Do not auto-open when the recipient came from the URL; the field is already answered.
-          defaultOpen={!chosen && !loadError && !waitingForUrlAgent}
-          autoHighlight
-          items={profiles ?? []}
-          isItemEqualToValue={(item: AgentProfile, value: AgentProfile) =>
-            item.id === value.id
-          }
-          itemToStringLabel={(item: AgentProfile) => item.name}
-          itemToStringValue={(item: AgentProfile) => item.id}
-          onValueChange={(next) => {
-            // Recipient changes are not separate navigation history entries.
-            void navigate({
-              replace: true,
-              search: next ? { agent: next.id } : {},
-            });
-          }}
-          value={chosen ?? null}
-        >
-          <ComboboxInput
-            // The popup opening is not enough on its own: typing filters through this input, so
-            // the caret starts here whenever the recipient question is still open. Same condition
-            // as `defaultOpen` — a recipient from the URL means the composer takes focus instead.
-            autoFocus={!chosen}
-            placeholder="Choose a coworker…"
-            // InputGroup owns focus rings via `has-[…:focus-visible]`; disable that wrapper ring here.
-            className="border-none w-full bg-transparent! text-sm has-[[data-slot=input-group-control]:focus-visible]:ring-0"
-          />
-          {/* Allow max-w to constrain the popup even though its anchor is full-width. */}
-          <ComboboxContent className="min-w-0 max-w-lg" sideOffset={12}>
-            <ComboboxEmpty>No agents found.</ComboboxEmpty>
-            <ComboboxList>
-              {(item: AgentProfile) => (
-                <ComboboxItem key={item.id} value={item} className="h-10">
-                  <ChannelAvatar participantIds={[item.id]} size={24} />
-                  {item.name}
-                  <span className="truncate text-muted-foreground ml-1">
-                    {item.title}
-                  </span>
-                </ComboboxItem>
-              )}
-            </ComboboxList>
-          </ComboboxContent>
-        </Combobox>
+        <span className="text-sm font-medium text-muted-foreground mr-1">To:</span>
+        {allSelectedAgents.map((profile) => (
+          <span
+            key={profile.id}
+            className="inline-flex items-center gap-1.5 rounded-full bg-secondary/80 pl-1 pr-2 py-0.5 text-xs font-medium text-secondary-foreground border border-border"
+          >
+            <ChannelAvatar participantIds={[profile.id]} size={18} />
+            <span>{profile.name}</span>
+            {allSelectedAgents.length > 1 && (
+              <button
+                type="button"
+                className="hover:text-destructive text-muted-foreground ml-0.5 rounded-full p-0.5"
+                onClick={() => {
+                  if (chosen?.id === profile.id) {
+                    const next = additionalAgents[0];
+                    setAdditionalAgents((prev) => prev.slice(1));
+                    void navigate({
+                      replace: true,
+                      search: next ? { agent: next.id } : {},
+                    });
+                  } else {
+                    setAdditionalAgents((prev) =>
+                      prev.filter((a) => a.id !== profile.id),
+                    );
+                  }
+                }}
+              >
+                ✕
+              </button>
+            )}
+          </span>
+        ))}
+        <div className="flex-1 min-w-[140px]">
+          <Combobox
+            autoHighlight
+            items={(profiles ?? []).filter(
+              (p) => !allSelectedAgents.some((sel) => sel.id === p.id),
+            )}
+            isItemEqualToValue={(item: AgentProfile, value: AgentProfile) =>
+              item.id === value.id
+            }
+            itemToStringLabel={(item: AgentProfile) => item.name}
+            itemToStringValue={(item: AgentProfile) => item.id}
+            onValueChange={(next) => {
+              if (!next) return;
+              if (allSelectedAgents.length === 0) {
+                void navigate({
+                  replace: true,
+                  search: { agent: next.id },
+                });
+              } else {
+                setAdditionalAgents((prev) => [...prev, next]);
+              }
+            }}
+            value={null}
+          >
+            <ComboboxInput
+              autoFocus={allSelectedAgents.length === 0}
+              placeholder={
+                allSelectedAgents.length === 0
+                  ? "Choose a coworker…"
+                  : "+ Add agent to group…"
+              }
+              className="border-none w-full bg-transparent! text-sm has-[[data-slot=input-group-control]:focus-visible]:ring-0"
+            />
+            <ComboboxContent className="min-w-0 max-w-lg" sideOffset={12}>
+              <ComboboxEmpty>No agents found.</ComboboxEmpty>
+              <ComboboxList>
+                {(item: AgentProfile) => (
+                  <ComboboxItem key={item.id} value={item} className="h-10">
+                    <ChannelAvatar participantIds={[item.id]} size={24} />
+                    {item.name}
+                    <span className="truncate text-muted-foreground ml-1">
+                      {item.title}
+                    </span>
+                  </ComboboxItem>
+                )}
+              </ComboboxList>
+            </ComboboxContent>
+          </Combobox>
+        </div>
       </div>
       <ConversationView
-        // Choosing a coworker answers the "To:" field, so the message is what remains: the caret
-        // lands in the composer the moment a recipient exists, whether picked here or in the URL.
         autoFocus
-        // Commands must be loaded before the first channel message is sent.
         commands={skillCommands}
         disabled={
           Boolean(loadError) || waitingForUrlAgent || recipients.length === 0
@@ -153,18 +201,17 @@ function RouteComponent() {
           ) : null
         }
         onSubmit={async (draft) => {
-          const recipient = recipients[0];
-          if (!recipient || !canSend(recipients, draft.text)) return;
+          if (recipients.length === 0 || !canSend(recipients, draft.text)) return;
 
           setError(null);
           setSent(seedMessage(draft.text, newId()));
 
           try {
-            // Recorded, then started: a coworker picked here is as much a choice as an `@` on the
-            // home screen, and the trail has to say so for both.
-            await startChosen(recipient.id, draft.text);
+            await startChosen(
+              recipients.map((r) => r.id),
+              draft.text,
+            );
           } catch (caught) {
-            // Preserve the unsent draft when channel creation fails.
             setSent(null);
             setError(
               caught instanceof Error

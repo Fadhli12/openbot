@@ -7,7 +7,9 @@ import {
 import {
   IconAlertTriangle,
   IconBox,
+  IconCheck,
   IconClock,
+  IconCopy,
   IconFile,
   IconX,
 } from "@tabler/icons-react";
@@ -550,6 +552,8 @@ function RoutineFiring({ instruction }: { instruction: string }) {
  *
  * It is also what keeps the entrance honest — no remount means no replay of the fade.
  */
+const GROUP_AGENT_HEADER_REGEX = /^### 🤖 \*\*([^*]+)\*\*(?: \(([^)]+)\))?\n\n/;
+
 const TranscriptMessage = memo(function TranscriptMessage({
   commandNames = "",
   delay,
@@ -562,11 +566,7 @@ const TranscriptMessage = memo(function TranscriptMessage({
   text: string;
 }) {
   const isUser = role === "user";
-  /*
-   * Checked before anything else a person's message gets. A firing is not a person's message: the
-   * chip split, the end alignment and the bubble are all wrong for it, and each one of them would
-   * have to learn about firings separately if this branched any later.
-   */
+  const [copied, setCopied] = useState(false);
   const firing = isUser ? readFiring(text) : null;
   if (firing !== null) {
     return (
@@ -582,15 +582,42 @@ const TranscriptMessage = memo(function TranscriptMessage({
   const align = isUser ? "end" : "start";
   const invoked = isUser ? splitSkillChip(text, commandNames) : null;
 
+  // Detect and render custom agent badge if this is a group round-robin assistant message
+  let agentBadge: string | null = null;
+  let modelLabel: string | null = null;
+  let cleanText = text;
+  if (!isUser) {
+    const match = text.match(GROUP_AGENT_HEADER_REGEX);
+    if (match) {
+      agentBadge = match[1];
+      modelLabel = match[2] ?? null;
+      cleanText = text.slice(match[0].length);
+    }
+  }
+
+  const handleCopy = () => {
+    void navigator.clipboard.writeText(cleanText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
-    <MessageRow align={align}>
+    <MessageRow align={align} className="group/row relative">
       <MessageContent>
         <Arriving delay={delay}>
-          {/*
-            A Bot's message takes the whole column, not the width of its words: block content
-            inside it — a fenced code block, a table — should span the transcript rather than
-            shrink to its own text. A person's bubble keeps fitting what they said.
-          */}
+          {agentBadge && (
+            <div className="flex items-center gap-1.5 mb-1 px-1">
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold bg-primary/10 text-primary border border-primary/20 shadow-xs">
+                <span>🤖</span>
+                <span>{agentBadge}</span>
+              </span>
+              {modelLabel && (
+                <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.2 rounded-md font-mono border border-border">
+                  {modelLabel}
+                </span>
+              )}
+            </div>
+          )}
           <Bubble
             align={align}
             variant={isUser ? "muted" : "ghost"}
@@ -598,20 +625,9 @@ const TranscriptMessage = memo(function TranscriptMessage({
           >
             <BubbleContent className={isUser ? undefined : "w-full"}>
               {isUser ? (
-                // A person's own message is shown exactly as they typed it. Rendering it as markdown
-                // would silently reformat what they said, and an asterisk in a sentence is not
-                // emphasis. The chip is the one exception, and it is not reformatting: it is drawing
-                // the thing that was already a chip in the composer as a chip here too, so the
-                // transcript shows a skill was used rather than a slash that was typed.
                 <span className="whitespace-pre-wrap">
                   {invoked ? (
                     <>
-                      {/*
-                       * The same icon the sidebar uses for Skills, so the badge says WHAT KIND of
-                       * thing was invoked before it says which one. `inline-flex` with
-                       * `align-middle` rather than a block: this sits mid-sentence, and a badge that
-                       * breaks the line it is in reads as a separate message.
-                       */}
                       <span className="mr-1 inline-flex items-center gap-1 rounded bg-foreground/10 px-1.5 py-0.5 align-middle font-mono text-foreground/80 text-xs">
                         <IconBox className="size-3 shrink-0" />/{invoked.chip}
                       </span>
@@ -622,16 +638,27 @@ const TranscriptMessage = memo(function TranscriptMessage({
                   )}
                 </span>
               ) : (
-                /*
-                 * A Bot's prose is markdown, and it arrives in pieces.
-                 *
-                 * Rendered with a streaming-aware renderer rather than an ordinary one: half a fenced
-                 * code block or an unclosed bold marker is the NORMAL state for most of a run, and a
-                 * plain markdown parser draws that as literal asterisks and backticks until the
-                 * closing token arrives, so the answer visibly rewrites itself as it lands. This
-                 * closes them for the duration.
-                 */
-                <Streamdown components={markdownComponents}>{text}</Streamdown>
+                <div className="relative group/bubble-text">
+                  <Streamdown components={markdownComponents}>{cleanText}</Streamdown>
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    className="absolute top-0 right-0 opacity-0 group-hover/bubble-text:opacity-100 transition-opacity p-1 rounded-md bg-muted/80 hover:bg-muted text-muted-foreground hover:text-foreground text-xs flex items-center gap-1"
+                    title="Copy message"
+                  >
+                    {copied ? (
+                      <>
+                        <IconCheck className="size-3 text-emerald-500" />
+                        <span className="text-[10px] text-emerald-500">Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <IconCopy className="size-3" />
+                        <span className="text-[10px]">Copy</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               )}
             </BubbleContent>
           </Bubble>

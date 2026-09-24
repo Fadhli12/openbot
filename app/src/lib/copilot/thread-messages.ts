@@ -175,7 +175,84 @@ function argumentsOf(args: unknown): string {
   }
 }
 
+// Cache TTL: 24 hours (86,400,000 ms) in memory
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const memoryThreadCache = new Map<string, { thread: StoredThread; cachedAt: number }>();
+
+function getLocalCachedThread(cacheKey: string): StoredThread | null {
+  try {
+    const raw = window.sessionStorage.getItem(`openbot_thread_${cacheKey}`);
+    if (raw) return JSON.parse(raw) as StoredThread;
+  } catch {}
+  return null;
+}
+
+function setLocalCachedThread(cacheKey: string, thread: StoredThread) {
+  try {
+    window.sessionStorage.setItem(`openbot_thread_${cacheKey}`, JSON.stringify(thread));
+  } catch {}
+}
+
 export async function readThreadMessages(
+  threadId: string,
+  agentId: string,
+  options: ReadThreadMessagesOptions = {},
+): Promise<StoredThread> {
+  const isTest = typeof process !== "undefined" && process.env?.NODE_ENV === "test";
+  const cacheKey = `${threadId}:${agentId}`;
+  const now = Date.now();
+  let cached = !isTest ? memoryThreadCache.get(cacheKey) : undefined;
+
+  if (!cached && !isTest && typeof window !== "undefined") {
+    const sessionSaved = getLocalCachedThread(cacheKey);
+    if (sessionSaved) {
+      cached = { thread: sessionSaved, cachedAt: now };
+      memoryThreadCache.set(cacheKey, cached);
+    }
+  }
+
+  // If cached and valid, return cached thread immediately (under 1ms)
+  if (cached && (now - cached.cachedAt) < CACHE_TTL_MS) {
+    // Revalidate quietly in the background if older than 30s so user never sees a loading skeleton
+    if (now - cached.cachedAt > 30_000) {
+      void (async () => {
+        try {
+          const fresh = await fetchFreshThreadMessages(threadId, agentId, options);
+          if (fresh.availability !== "unavailable") {
+            memoryThreadCache.set(cacheKey, { thread: fresh, cachedAt: Date.now() });
+            if (typeof window !== "undefined") {
+              setLocalCachedThread(cacheKey, fresh);
+            }
+          }
+        } catch {}
+      })();
+    }
+    return cached.thread;
+  }
+
+  const fresh = await fetchFreshThreadMessages(threadId, agentId, options);
+  if (!isTest && fresh.availability !== "unavailable") {
+    memoryThreadCache.set(cacheKey, { thread: fresh, cachedAt: Date.now() });
+    if (typeof window !== "undefined") {
+      setLocalCachedThread(cacheKey, fresh);
+    }
+  }
+  return fresh;
+}
+
+export function invalidateThreadCache(threadId: string, agentId?: string): void {
+  if (agentId) {
+    memoryThreadCache.delete(`${threadId}:${agentId}`);
+  } else {
+    for (const key of memoryThreadCache.keys()) {
+      if (key.startsWith(`${threadId}:`)) {
+        memoryThreadCache.delete(key);
+      }
+    }
+  }
+}
+
+async function fetchFreshThreadMessages(
   threadId: string,
   agentId: string,
   options: ReadThreadMessagesOptions = {},

@@ -996,6 +996,7 @@ const copilotRuntime = mountCopilotRuntime(
   // And that those files went out in a send, written by the person who sent them and only for rows
   // they uploaded. See markAttachmentsSentForActor.
   markAttachmentsSentForActor,
+  database,
 );
 
 /**

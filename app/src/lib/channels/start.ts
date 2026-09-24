@@ -20,12 +20,15 @@ import { routeMessage } from "./route";
  * Pure so the sequence can be tested; the hook below binds it to the real calls.
  */
 export async function startWithChosen(input: {
-  agentId: string;
+  agentId: string | string[];
   text: string;
   record: (text: string, agentId: string) => Promise<unknown>;
-  start: (agentId: string, text: string) => Promise<void>;
+  start: (agentIds: any, text: string) => Promise<void>;
 }): Promise<void> {
-  await input.record(input.text, input.agentId).catch(() => undefined);
+  const primaryId = Array.isArray(input.agentId) ? input.agentId[0] : input.agentId;
+  if (primaryId) {
+    await input.record(input.text, primaryId).catch(() => undefined);
+  }
   await input.start(input.agentId, input.text);
 }
 
@@ -40,8 +43,9 @@ export function useStartChannel() {
   const navigate = useNavigate();
   const createChannel = useMutation(createChannelMutationOptions(queryClient));
 
-  const start = async (agentId: string, text: string) => {
-    const channel = await createChannel.mutateAsync([agentId]);
+  const start = async (agentIds: string | string[], text: string) => {
+    const ids = Array.isArray(agentIds) ? agentIds : [agentIds];
+    const channel = await createChannel.mutateAsync(ids);
     queryClient.setQueryData(channelKeys.detail(channel.id), channel);
     stashFirstMessage(channel.id, text);
     await navigate({
@@ -54,8 +58,8 @@ export function useStartChannel() {
   return {
     pending: createChannel.isPending,
     start,
-    /** `start`, for a coworker the person chose: the choice is recorded first. */
-    startChosen: (agentId: string, text: string) =>
-      startWithChosen({ agentId, text, record: routeMessage, start }),
+    /** `start`, for coworkers the person chose: the choice is recorded first. */
+    startChosen: (agentIds: string | string[], text: string) =>
+      startWithChosen({ agentId: agentIds, text, record: routeMessage, start }),
   };
 }

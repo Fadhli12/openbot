@@ -1,5 +1,5 @@
+import { AbstractAgent, EventType, HttpAgent } from "@ag-ui/client";
 import type { BaseEvent, Message, RunAgentInput } from "@ag-ui/client";
-import { AbstractAgent, HttpAgent } from "@ag-ui/client";
 import type { BuiltInAgentConfiguration } from "@copilotkit/runtime/v2";
 import {
   BuiltInAgent,
@@ -7,9 +7,12 @@ import {
   CopilotRuntime,
 } from "@copilotkit/runtime/v2";
 import { createCopilotHonoHandler } from "@copilotkit/runtime/v2/hono";
-import type { Observable } from "rxjs";
-import { defer, finalize, from, fromEvent, switchMap, takeUntil } from "rxjs";
+import { Observable, defer, finalize, from, fromEvent, switchMap, takeUntil } from "rxjs";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { eq } from "drizzle-orm";
+import type { Database } from "./db/client";
+import { channels, intelligenceChannelMappings } from "./db/schema";
 import {
   COMPUTER_GUIDANCE,
   PROVENANCE_GUIDANCE,
@@ -1529,38 +1532,50 @@ class BuiltInAgentWithSaneHistory extends BuiltInAgent {
       (input.resume ?? []).map((entry) => entry.interruptId),
     );
     const history = sanitizeSeededHistory(input.messages, answeredByResume);
+
+    // Extract dynamic model override if present in message content or directives (latest takes precedence)
+    let agentToRun: BuiltInAgentWithSaneHistory = this;
+    for (const msg of [...history].reverse()) {
+      if (typeof msg.content === "string") {
+        const match = msg.content.match(/\[model:([^\]]+)\]/i);
+        if (match) {
+          const modelId = match[1].trim();
+          const newConfig: BuiltInAgentConfiguration = {
+            ...this.configuration,
+            model: `openai/${modelId}`,
+          };
+          agentToRun = new BuiltInAgentWithSaneHistory(
+            newConfig,
+            this.loadAttachment,
+            this.markAttachmentsSent,
+          );
+          break;
+        }
+      }
+    }
+
     const load = this.loadAttachment;
-    /*
-     * ALONGSIDE THE GUARD ABOVE, NOT INSTEAD OF IT. One drops a conversation the model provider is
-     * going to refuse; this replaces the stored reference a person's attachment arrives as with the
-     * bytes themselves, because `BuiltInAgent.run` converts `input.messages` with no seam in
-     * between and a `/api/attachments/<id>` URL is not something a model provider will go and fetch.
-     *
-     * Nothing to load means nothing to inline, and the run goes up exactly as it did before any of
-     * this existed.
-     */
     if (!load)
-      return observeModelConnection(super.run({ ...input, messages: history }));
-    /*
-     * Deferred, because `run` has to answer with a stream straight away and reading the bytes is a
-     * database round trip. `defer` puts that read on the subscription, which is where the run
-     * actually begins, so nothing is fetched until somebody is listening.
-     */
+      return observeModelConnection(agentToRun.superRun({ ...input, messages: history }));
+
     return defer(() =>
       from(
         inlineAttachments(
           history,
           load,
-          // As above: the run's own conversation, not the actor's channels at large.
           input.threadId,
           this.markAttachmentsSent,
         ),
       ).pipe(
         switchMap((messages) =>
-          observeModelConnection(super.run({ ...input, messages })),
+          observeModelConnection(agentToRun.superRun({ ...input, messages })),
         ),
       ),
     );
+  }
+
+  superRun(input: RunAgentInput): Observable<BaseEvent> {
+    return super.run(input);
   }
 
   /**
@@ -1710,6 +1725,370 @@ class UnavailableAgent extends AbstractAgent {
   }
 }
 
+class GroupRoundRobinAgent extends AbstractAgent {
+  private activeInner?: AbstractAgent;
+
+  constructor(
+    private readonly groupBotIds: string[],
+    private readonly agentMap: Record<string, AbstractAgent>,
+    agentId: string,
+    private readonly loadChannelMeta?: (threadId: string) => Promise<{
+      description?: string;
+      history: Message[];
+    }>,
+  ) {
+    super({ agentId, description: "Group Round Robin Discussion" });
+  }
+
+  clone(): GroupRoundRobinAgent {
+    return new GroupRoundRobinAgent(
+      this.groupBotIds,
+      this.agentMap,
+      this.agentId ?? "group-chat",
+      this.loadChannelMeta,
+    );
+  }
+
+  run(input: RunAgentInput): Observable<BaseEvent> {
+    return new Observable<BaseEvent>((subscriber) => {
+      let isAborted = false;
+      const abortCleanup = () => {
+        isAborted = true;
+        this.activeInner?.abortRun?.();
+      };
+
+      (async () => {
+        subscriber.next({ type: EventType.RUN_STARTED });
+
+        let channelTopic = "";
+        let accumulatedMessages: Message[] = [];
+        if (input.threadId && this.loadChannelMeta) {
+          try {
+            const meta = await this.loadChannelMeta(input.threadId);
+            channelTopic = meta.description?.trim() ?? "";
+            const existingIds = new Set(meta.history.map((m) => m.id));
+            accumulatedMessages = [
+              ...meta.history,
+              ...(Array.isArray(input.messages)
+                ? input.messages.filter((m) => !existingIds.has(m.id))
+                : []),
+            ];
+          } catch {
+            accumulatedMessages = Array.isArray(input.messages)
+              ? [...input.messages]
+              : [];
+          }
+        } else {
+          accumulatedMessages = Array.isArray(input.messages)
+            ? [...input.messages]
+            : [];
+        }
+
+        const roundsMatch = channelTopic.match(/\[rounds:(\d+)\]/);
+        const totalRounds = roundsMatch ? Math.max(1, parseInt(roundsMatch[1], 10)) : 1;
+        
+        const modeMatch = channelTopic.match(/\[mode:(collaborative|debate|brainstorm)\]/i);
+        const collaborationMode = modeMatch ? modeMatch[1].toLowerCase() : "collaborative";
+
+        const modelMatch = channelTopic.match(/\[model:([^\]]+)\]/i);
+        const channelModel = modelMatch ? modelMatch[1].trim() : null;
+
+        const agentModelMatches = [...channelTopic.matchAll(/\[agent_model:([^:]+):([^\]]+)\]/gi)];
+        const agentModelMap: Record<string, string> = {};
+        for (const match of agentModelMatches) {
+          agentModelMap[match[1].trim()] = match[2].trim();
+        }
+        
+        const roleMatches = [...channelTopic.matchAll(/\[role:([^:]+):([^\]]+)\]/gi)];
+        const roleOverrides: Record<string, string> = {};
+        for (const match of roleMatches) {
+          roleOverrides[match[1]] = match[2].trim();
+        }
+
+        channelTopic = channelTopic
+          .replace(/\s*\[rounds:\d+\]\s*/gi, "")
+          .replace(/\s*\[mode:[^\]]+\]\s*/gi, "")
+          .replace(/\s*\[model:[^\]]+\]\s*/gi, "")
+          .replace(/\s*\[agent_model:[^\]]+\]\s*/gi, "")
+          .replace(/\s*\[role:[^\]]+\]\s*/gi, "")
+          .trim();
+
+        // Check if user specifically mentioned one or more agents with @
+        const latestUserMsg = [...accumulatedMessages]
+          .reverse()
+          .find((m) => m.role === "user");
+        const userText =
+          typeof latestUserMsg?.content === "string" ? latestUserMsg.content : "";
+        const mentionedBotIds = this.groupBotIds.filter((id) => {
+          const pattern = new RegExp(`@${id}\\b|@${id.replace(/-/g, " ")}\\b`, "i");
+          return pattern.test(userText);
+        });
+
+        const activeSpeakers =
+          mentionedBotIds.length > 0 ? mentionedBotIds : this.groupBotIds;
+
+        for (let round = 1; round <= totalRounds; round++) {
+          if (isAborted) break;
+
+          for (const botId of activeSpeakers) {
+            if (isAborted) break;
+            const agent = this.agentMap[botId];
+            if (!agent) continue;
+
+            this.activeInner = agent;
+            const msgId = `msg-${randomUUID()}`;
+            const formattedName = botId
+              .replace(/[-_]/g, " ")
+              .replace(/\b\w/g, (c) => c.toUpperCase());
+
+            subscriber.next({
+              type: EventType.TEXT_MESSAGE_START,
+              messageId: msgId,
+              role: "assistant",
+              name: botId,
+            });
+
+            const targetModel =
+              agentModelMap[botId] || channelModel || "antigravity/gemini-3.8-flash-tiered";
+            const modelLabel = targetModel.split("/").pop();
+            const roundBadge = totalRounds > 1 ? ` (Round ${round}/${totalRounds})` : "";
+            const badgeHeader = `### 🤖 **${formattedName}** (${modelLabel})${roundBadge}\n\n`;
+            subscriber.next({
+              type: EventType.TEXT_MESSAGE_CONTENT,
+              messageId: msgId,
+              delta: badgeHeader,
+            });
+
+            let currentAgentText = badgeHeader;
+
+            await new Promise<void>((resolve, reject) => {
+              const topicConstraint =
+                channelTopic && channelTopic !== "Private agent channel."
+                  ? `\nGroup Defined Scope: "${channelTopic}".\nStay strictly within this scope and boundary.`
+                  : "";
+
+              const modelDirective = `[model:${targetModel}]\n`;
+
+              const roundDirective = round >= 2 
+                ? `\n- ROUND ${round}: Address points made in previous rounds and sharpen your arguments. Build upon or respectfully challenge what has been said.`
+                : "";
+
+              let modeDirective = "";
+              if (collaborationMode === "debate" && activeSpeakers.indexOf(botId) > 0) {
+                modeDirective = "\n[DEBATE & DEVIL'S ADVOCATE MODE]\nActively stress-test, challenge assumptions, and highlight critical vulnerabilities or flaws in the proposals made by previous agents before presenting your counter-approach.\n";
+              } else if (collaborationMode === "brainstorm") {
+                modeDirective = "\n[DIVERGENT BRAINSTORMING MODE]\nOffer unconventional, bold, and distinct alternative paradigms. Do not just iterate on previous ideas—explore orthogonal solutions.\n";
+              }
+
+              const roleDirective = roleOverrides[botId] 
+                ? `\n[ROLE OVERRIDE]\nAdopt this specific persona constraint for this discussion: ${roleOverrides[botId]}` 
+                : "";
+
+              const turnDirective: Message = {
+                id: `dir-${randomUUID()}`,
+                role: "user",
+                content:
+                  `${modelDirective}${modeDirective}${roleDirective}\n[ROUND ROBIN TURN: ${formattedName.toUpperCase()} - ROUND ${round}]\n` +
+                  `You are speaking strictly as **${formattedName}** (${botId}) in this group discussion.${topicConstraint}\n` +
+                  `- Provide ONLY your own response, critique, or insights as ${formattedName}.\n` +
+                  `- Address the user's prompt and respond to other agents' prior remarks where appropriate.${roundDirective}\n` +
+                  `- CRITICAL: Do NOT speak for other agents, do NOT generate responses or dialogue for other bots, and do NOT output headers (e.g. "### 🤖") for anyone else.\n` +
+                  `- Stop generating immediately once your own answer is complete.`,
+              };
+
+              const agentInput: RunAgentInput = {
+                ...input,
+                runId: `run-${randomUUID()}`,
+                messages: [...accumulatedMessages, turnDirective],
+                tools: input.tools ?? [],
+                context: input.context ?? [],
+              };
+
+              let stoppedEarly = false;
+              let rawDeltaCount = 0;
+              const sub = agent.run(agentInput).subscribe({
+                next: (ev) => {
+                  if (stoppedEarly) return;
+                  if (
+                    ev.type === EventType.TEXT_MESSAGE_CONTENT ||
+                    ev.type === EventType.TEXT_MESSAGE_CHUNK
+                  ) {
+                    rawDeltaCount++;
+                    // Guard against hallucinated trailing turns for other agents (after initial chunks)
+                    if (rawDeltaCount > 2) {
+                      const combined = currentAgentText + ev.delta;
+                      const remaining = combined.slice(badgeHeader.length);
+                      const hallucinatedMatch = remaining.match(
+                        /(\n\s*---\s*\n\s*###\s*🤖|\n\s*###\s*🤖\s*\*\*)/i,
+                      );
+                      if (hallucinatedMatch && hallucinatedMatch.index !== undefined) {
+                        stoppedEarly = true;
+                        sub.unsubscribe();
+                        resolve();
+                        return;
+                      }
+                    }
+
+                    currentAgentText += ev.delta;
+                    subscriber.next({
+                      type: EventType.TEXT_MESSAGE_CONTENT,
+                      messageId: msgId,
+                      delta: ev.delta,
+                    });
+                  }
+                },
+                error: (err) => {
+                  sub.unsubscribe();
+                  reject(err);
+                },
+                complete: () => {
+                  sub.unsubscribe();
+                  resolve();
+                },
+              });
+            });
+
+            subscriber.next({
+              type: EventType.TEXT_MESSAGE_END,
+              messageId: msgId,
+            });
+
+            accumulatedMessages.push({
+              id: msgId,
+              role: "assistant",
+              content: currentAgentText,
+            });
+          }
+        }
+
+        // Synthesis turn: if multiple speakers, synthesize consensus
+        if (activeSpeakers.length > 1 && !isAborted) {
+          const synthesizer = this.agentMap[activeSpeakers[0]];
+          if (synthesizer) {
+            this.activeInner = synthesizer;
+            const synthMsgId = `msg-${randomUUID()}`;
+
+            subscriber.next({
+              type: EventType.TEXT_MESSAGE_START,
+              messageId: synthMsgId,
+              role: "assistant",
+              name: activeSpeakers[0],
+            });
+
+            const synthBadgeHeader = `### 🤖 **Consensus & Synthesis**\n\n`;
+            subscriber.next({
+              type: EventType.TEXT_MESSAGE_CONTENT,
+              messageId: synthMsgId,
+              delta: synthBadgeHeader,
+            });
+
+            let synthText = synthBadgeHeader;
+
+            const synthModelDirective = channelModel ? `[model:${channelModel}]\n` : "";
+
+            await new Promise<void>((resolve, reject) => {
+              const synthDirective: Message = {
+                id: `dir-${randomUUID()}`,
+                role: "user",
+                content:
+                  `${synthModelDirective}[GROUP DISCUSSION SYNTHESIS & CONSENSUS DIRECTIVE]\n` +
+                  `You are a senior executive synthesizer summarizing this multi-agent discussion. Synthesize all perspectives provided by the agents above. Identify: 1) Key areas of agreement, 2) Key trade-offs or differing perspectives, 3) Final actionable recommendation and conclusion. Be objective, thorough, and structured.`,
+              };
+
+              const synthInput: RunAgentInput = {
+                ...input,
+                runId: `run-${randomUUID()}`,
+                messages: [...accumulatedMessages, synthDirective],
+                tools: input.tools ?? [],
+                context: input.context ?? [],
+              };
+
+              const synthSub = synthesizer.run(synthInput).subscribe({
+                next: (ev) => {
+                  if (
+                    ev.type === EventType.TEXT_MESSAGE_CONTENT ||
+                    ev.type === EventType.TEXT_MESSAGE_CHUNK
+                  ) {
+                    synthText += ev.delta;
+                    subscriber.next({
+                      type: EventType.TEXT_MESSAGE_CONTENT,
+                      messageId: synthMsgId,
+                      delta: ev.delta,
+                    });
+                  }
+                },
+                error: (err) => {
+                  synthSub.unsubscribe();
+                  reject(err);
+                },
+                complete: () => {
+                  synthSub.unsubscribe();
+                  resolve();
+                },
+              });
+            });
+
+            subscriber.next({
+              type: EventType.TEXT_MESSAGE_END,
+              messageId: synthMsgId,
+            });
+
+            accumulatedMessages.push({
+              id: synthMsgId,
+              role: "assistant",
+              content: synthText,
+            });
+          }
+        }
+
+        subscriber.next({ type: EventType.RUN_FINISHED });
+        subscriber.complete();
+      })().catch((err) => {
+        subscriber.error(err);
+      });
+
+      return abortCleanup;
+    });
+  }
+
+  abortRun(): void {
+    this.activeInner?.abortRun?.();
+    super.abortRun();
+  }
+}
+
+function withGroupRoundRobinProxy(
+  built: Record<string, AbstractAgent>,
+  groupBotIds: string[],
+  onlyBotId?: string,
+  loadChannelMeta?: (threadId: string) => Promise<{
+    description?: string;
+    history: Message[];
+  }>,
+): Record<string, AbstractAgent> {
+  const handler: ProxyHandler<Record<string, AbstractAgent>> = {
+    get(target, prop) {
+      if (typeof prop === "string" && prop.startsWith("group:")) {
+        const ids = prop.slice("group:".length).split(",").filter(Boolean);
+        return new GroupRoundRobinAgent(ids, target, prop, loadChannelMeta);
+      }
+      return Reflect.get(target, prop);
+    },
+    has(target, prop) {
+      if (typeof prop === "string" && prop.startsWith("group:")) {
+        return true;
+      }
+      return Reflect.has(target, prop);
+    },
+  };
+
+  const proxy = new Proxy(built, handler);
+  if (onlyBotId && onlyBotId.startsWith("group:")) {
+    built[onlyBotId] = new GroupRoundRobinAgent(groupBotIds, built, onlyBotId, loadChannelMeta);
+  }
+  return proxy;
+}
+
 export async function resolveRuntimeAgents(
   loadAgents: () => Promise<RegisteredAgent[]>,
   model: RuntimeModel,
@@ -1753,6 +2132,10 @@ export async function resolveRuntimeAgents(
    * same positional reason. Absent means nothing is recorded.
    */
   markAttachmentsSent?: MarkAttachmentsSent,
+  loadChannelMeta?: (threadId: string) => Promise<{
+    description?: string;
+    history: Message[];
+  }>,
 ): Promise<Record<string, AbstractAgent>> {
   const all = await loadAgents();
   if (all.length === 0) {
@@ -1760,10 +2143,17 @@ export async function resolveRuntimeAgents(
       "No agents are registered. Add one to the tenant package or the agents table.",
     );
   }
+  const isGroup = typeof onlyBotId === "string" && onlyBotId.startsWith("group:");
+  const groupBotIds = isGroup
+    ? onlyBotId.slice("group:".length).split(",").filter(Boolean)
+    : [];
+
   const registered =
     onlyBotId === undefined
       ? all
-      : all.filter((agent) => agent.id === onlyBotId);
+      : isGroup
+        ? all.filter((agent) => groupBotIds.includes(agent.id))
+        : all.filter((agent) => agent.id === onlyBotId);
   // Not an error: a caller asking for a Bot this person cannot see gets an empty result and decides
   // what that means, exactly as it would have from a roster that did not contain it.
   if (registered.length === 0) return {};
@@ -1771,7 +2161,7 @@ export async function resolveRuntimeAgents(
   const apiKey = registered.some((agent) => agent.type === "built_in")
     ? await resolveModelApiKey()
     : null;
-  return buildAgents(
+  const built = await buildAgents(
     registered,
     model,
     apiKey,
@@ -1788,6 +2178,8 @@ export async function resolveRuntimeAgents(
     loadAttachment,
     markAttachmentsSent,
   );
+
+  return withGroupRoundRobinProxy(built, groupBotIds, onlyBotId, loadChannelMeta);
 }
 
 /** What one Bot may call, for the person whose request this is. */
@@ -1890,9 +2282,47 @@ export function createRequestAgents(
    * nothing is recorded.
    */
   markAttachmentsSentForActor?: (actorId: string) => MarkAttachmentsSent,
+  intelligenceClient?: CopilotKitIntelligence,
+  database?: Database,
 ) {
   return async ({ request }: { request: Request }) => {
     const actor = await identifyActor(request);
+    const loadChannelMeta = async (threadId: string) => {
+      let description = "";
+      if (database) {
+        try {
+          const [row] = await database
+            .select({ description: channels.description })
+            .from(intelligenceChannelMappings)
+            .innerJoin(
+              channels,
+              eq(channels.id, intelligenceChannelMappings.channelId),
+            )
+            .where(eq(intelligenceChannelMappings.threadId, threadId));
+          if (row?.description) {
+            description = row.description;
+          }
+        } catch {
+          // Fall back to empty description
+        }
+      }
+
+      let history: Message[] = [];
+      if (intelligenceClient) {
+        try {
+          const res = await intelligenceClient.getThreadMessages({
+            threadId,
+            userId: actor.id || "dev-local-user",
+          });
+          history = res.messages as unknown as Message[];
+        } catch {
+          // Fall back to empty history
+        }
+      }
+
+      return { description, history };
+    };
+
     return resolveRuntimeAgents(
       () => loadAgents(actor),
       model,
@@ -1913,6 +2343,7 @@ export function createRequestAgents(
       undefined,
       loadAttachmentForActor?.(actor.id),
       markAttachmentsSentForActor?.(actor.id),
+      loadChannelMeta,
     );
   };
 }
@@ -1984,12 +2415,51 @@ export async function historyOrEmpty<T>(
  * the browser expects and a 200 instead of a 500.
  */
 class IntelligenceKnowingANewThread extends CopilotKitIntelligence {
-  override getThreadMessages(
+  private threadMessagesCache = new Map<string, { data: any; timestamp: number }>();
+  // 24 hours TTL for server thread cache
+  private CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+  override async getThreadMessages(
     params: Parameters<CopilotKitIntelligence["getThreadMessages"]>[0],
   ) {
-    return historyOrEmpty(() => super.getThreadMessages(params), {
+    const key = `${params.threadId}:${params.userId}`;
+    const now = Date.now();
+    const cached = this.threadMessagesCache.get(key);
+
+    // Return cached history immediately if within 24 hours
+    if (cached && now - cached.timestamp < this.CACHE_TTL_MS) {
+      // Revalidate in background if older than 30 seconds so we keep it fresh
+      if (now - cached.timestamp > 30_000) {
+        void (async () => {
+          try {
+            const fresh = await historyOrEmpty(() => super.getThreadMessages(params), {
+              messages: [],
+            });
+            if (fresh && Array.isArray(fresh.messages) && fresh.messages.length >= (cached.data?.messages?.length ?? 0)) {
+              this.threadMessagesCache.set(key, { data: fresh, timestamp: Date.now() });
+            }
+          } catch {}
+        })();
+      }
+      return cached.data;
+    }
+
+    const result = await historyOrEmpty(() => super.getThreadMessages(params), {
       messages: [],
     });
+
+    if (result && Array.isArray(result.messages)) {
+      this.threadMessagesCache.set(key, { data: result, timestamp: Date.now() });
+    }
+    return result;
+  }
+
+  invalidateThreadCache(threadId: string): void {
+    for (const key of this.threadMessagesCache.keys()) {
+      if (key.startsWith(`${threadId}:`)) {
+        this.threadMessagesCache.delete(key);
+      }
+    }
   }
 }
 
@@ -2064,6 +2534,7 @@ export function mountCopilotRuntime(
    * write is scoped to rows that person uploaded. Appended last. Absent means nothing is recorded.
    */
   markAttachmentsSentForActor?: (actorId: string) => MarkAttachmentsSent,
+  database?: Database,
 ) {
   const { intelligence } = config.runtime;
 
@@ -2188,6 +2659,8 @@ export function mountCopilotRuntime(
       loadInstructionsForActor,
       loadAttachmentForActor,
       markAttachmentsSentForActor,
+      intelligenceClient,
+      database,
     ) as never,
   });
 

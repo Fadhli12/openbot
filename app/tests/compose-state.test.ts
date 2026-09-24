@@ -15,8 +15,15 @@ describe("addRecipient", () => {
   });
 
   test("replaces rather than appends once the cap is reached", () => {
-    // One coworker per channel today; a second pick replaces the first.
-    expect(addRecipient([KNOWLEDGE], RISK)).toEqual([RISK]);
+    // Replaces oldest once MAX_RECIPIENTS is exceeded
+    const fullList = Array.from({ length: MAX_RECIPIENTS }, (_, i) => ({
+      id: `agent-${i}`,
+      name: `Agent ${i}`,
+    }));
+    const next = { id: "agent-next", name: "Agent Next" };
+    const result = addRecipient(fullList, next);
+    expect(result.length).toBe(MAX_RECIPIENTS);
+    expect(result[result.length - 1]).toEqual(next);
   });
 
   test("adding the coworker already chosen is a no-op", () => {
@@ -47,7 +54,7 @@ describe("canSend", () => {
     expect(canSend([KNOWLEDGE], "   ")).toBe(false);
   });
 
-  test("cap is one", () => {
-    expect(MAX_RECIPIENTS).toBe(1);
+  test("cap allows multiple coworkers", () => {
+    expect(MAX_RECIPIENTS).toBeGreaterThan(1);
   });
 });

@@ -40,6 +40,7 @@ import type { ThreadIdentity } from "./thread-identity";
 export type AgentChannel = {
   id: string;
   name: string;
+  description?: string;
   agentIds: string[];
   threadId: string;
   active: boolean;
@@ -161,6 +162,11 @@ type ChannelTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 export type ChannelStore = {
   create(actor: AgentActor, agentIds: string[]): Promise<AgentChannel>;
+  update(
+    actor: AgentActor,
+    channelId: string,
+    input: { name?: string; description?: string; agentIds?: string[] },
+  ): Promise<AgentChannel>;
   /**
    * The one conversation this person has with this Bot alone, made if they have not had one yet.
    *
@@ -309,6 +315,66 @@ export function createChannelStore(
       );
     },
 
+    async update(actor, channelId, input) {
+      return database.transaction(
+        async (transaction) => {
+          const [membership] = await transaction
+            .select({ channelId: channelMemberships.channelId })
+            .from(channelMemberships)
+            .innerJoin(
+              channels,
+              and(
+                eq(channels.id, channelMemberships.channelId),
+                isNull(channels.deletedAt),
+              ),
+            )
+            .where(
+              and(
+                eq(channelMemberships.channelId, channelId),
+                eq(channelMemberships.userId, actor.id),
+              ),
+            );
+          if (!membership) throw new ChannelNotFoundError(channelId);
+
+          const sets: Record<string, unknown> = { updatedAt: new Date() };
+          if (typeof input.name === "string" && input.name.trim()) {
+            sets.name = input.name.trim();
+          }
+          if (typeof input.description === "string") {
+            sets.description = input.description.trim();
+          }
+
+          await transaction
+            .update(channels)
+            .set(sets)
+            .where(eq(channels.id, channelId));
+
+          if (Array.isArray(input.agentIds) && input.agentIds.length > 0) {
+            for (const agentId of input.agentIds) {
+              const profile = await profileStore.getWithin(transaction, actor, agentId);
+              if (!profile) throw new AgentNotFoundError(agentId);
+            }
+
+            await transaction
+              .delete(channelAgents)
+              .where(eq(channelAgents.channelId, channelId));
+
+            await transaction.insert(channelAgents).values(
+              input.agentIds.map((agentId) => ({
+                channelId,
+                agentId,
+              })),
+            );
+          }
+
+          const updated = await store.get(actor, channelId);
+          if (!updated) throw new ChannelNotFoundError(channelId);
+          return updated;
+        },
+        { isolationLevel: "read committed" },
+      );
+    },
+
     async direct(actor, agentId) {
       const found = await database.transaction(
         async (transaction) => {
@@ -379,6 +445,7 @@ export function createChannelStore(
         .select({
           id: channels.id,
           name: channels.name,
+          description: channels.description,
           agentId: channelAgents.agentId,
           threadId: intelligenceChannelMappings.threadId,
           lastMessageAt: channels.lastMessageAt,
@@ -413,6 +480,7 @@ export function createChannelStore(
       return {
         id: first.id,
         name: first.name,
+        description: first.description,
         agentIds: rows.map((row) => row.agentId),
         threadId: first.threadId,
         active: rows.every((row) => row.deletedAt === null),
@@ -726,13 +794,17 @@ export function createChannelStore(
           if (!membership) throw new ChannelNotFoundError(channelId);
 
           if (activity.agentId !== null) {
+            const isGroup = activity.agentId.startsWith("group:");
+            const checkAgentId = isGroup
+              ? activity.agentId.slice("group:".length).split(",")[0]
+              : activity.agentId;
             const [linked] = await transaction
               .select({ agentId: channelAgents.agentId })
               .from(channelAgents)
               .where(
                 and(
                   eq(channelAgents.channelId, channelId),
-                  eq(channelAgents.agentId, activity.agentId),
+                  eq(channelAgents.agentId, checkAgentId),
                 ),
               );
             if (!linked) throw new AgentNotFoundError(activity.agentId);
@@ -741,12 +813,15 @@ export function createChannelStore(
           // A person's message and the agent's reply are reported separately, so they can arrive out
           // of order. Only ever move forwards.
           const lastMessage = previewOf(activity.text);
+          const appliedAgentId = activity.agentId?.startsWith("group:")
+            ? activity.agentId.slice("group:".length).split(",")[0]
+            : activity.agentId;
           const applied = await transaction
             .update(channels)
             .set({
               lastMessage,
               lastMessageAt: activity.at,
-              lastMessageAgentId: activity.agentId,
+              lastMessageAgentId: appliedAgentId,
               updatedAt: new Date(),
             })
             .where(
@@ -1191,6 +1266,35 @@ export function createChannelRoutes(
     }
   });
 
+  routes.patch("/:channelId", requireUser, async (context) => {
+    const channelId = context.req.param("channelId");
+    const body = (await context.req.json().catch(() => null)) as {
+      name?: unknown;
+      description?: unknown;
+      agentIds?: unknown;
+    } | null;
+
+    if (!body || typeof body !== "object") {
+      return context.json({ error: "Invalid body" }, 400);
+    }
+
+    try {
+      const updated = await store.update(context.var.actor, channelId, {
+        name: typeof body.name === "string" ? body.name : undefined,
+        description:
+          typeof body.description === "string" ? body.description : undefined,
+        agentIds:
+          Array.isArray(body.agentIds) &&
+          body.agentIds.every((id) => typeof id === "string")
+            ? (body.agentIds as string[])
+            : undefined,
+      });
+      return context.json({ channel: channelDto(updated) });
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
   return routes;
 }
 
@@ -1203,6 +1307,7 @@ function channelDto(channel: AgentChannel): ChannelWire {
   return {
     id: channel.id,
     name: channel.name,
+    description: channel.description,
     agentIds: channel.agentIds,
     threadId: channel.threadId,
     active: channel.active,

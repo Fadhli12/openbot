@@ -11,15 +11,10 @@ import { client } from "@/lib/client";
 export type AgentChannel = {
   id: string;
   name: string;
+  description?: string;
   agentIds: string[];
   threadId: string;
   active: boolean;
-  /**
-   * ISO-8601 when something was last said here, or null for a conversation nobody has used.
-   *
-   * The conversation screen needs this to tell two silences apart: a new conversation with no
-   * history, and one whose history this deployment cannot reach. See `channel-chat.tsx`.
-   */
   lastMessageAt: string | null;
 };
 
@@ -95,5 +90,6 @@ export function channelQueryOptions(channelId: string) {
         fallback: "Could not load this channel",
       });
     },
+    staleTime: 60_000,
   });
 }

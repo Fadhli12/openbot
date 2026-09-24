@@ -127,13 +127,20 @@ export const Channel = memo(function Channel({
             </div>
             <div className="flex-col min-w-0 flex-1">
               <div className="flex flex-row items-center justify-between gap-2">
-                <span
-                  className={`text-[14px] tracking-[-1%] truncate ${
-                    unread ? "font-medium" : ""
-                  }`}
-                >
-                  {name}
-                </span>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span
+                    className={`text-[14px] tracking-[-1%] truncate ${
+                      unread ? "font-medium" : ""
+                    }`}
+                  >
+                    {name}
+                  </span>
+                  {participantIds.length > 1 && (
+                    <span className="shrink-0 text-[10px] uppercase font-semibold px-1.5 py-0.2 rounded-md bg-secondary text-secondary-foreground border border-border">
+                      Group • {participantIds.length}
+                    </span>
+                  )}
+                </div>
                 <div className="text-[12px] text-muted-foreground/70">
                   {lastMessageAt}
                 </div>

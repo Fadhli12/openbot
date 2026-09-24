@@ -6,6 +6,7 @@ import {
   IconSearch,
   IconSettings,
   IconShieldLock,
+  IconUsers,
 } from "@tabler/icons-react";
 import {
   useInfiniteQuery,
@@ -51,6 +52,7 @@ import {
   channelListQueryOptions,
 } from "@/lib/channels/queries";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
+import { CreateGroupDialog } from "@/components/channels/create-group-dialog";
 import { appConfig } from "@/lib/generated/application-config";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { relativeTime } from "@/lib/relative-time";
@@ -109,11 +111,18 @@ export function matchingChannels(
   if (!needle) {
     return channels;
   }
-  return channels.filter((channel) =>
-    [channel.name, channel.summary, channel.lastMessage].some((field) =>
-      field?.toLowerCase().includes(needle),
-    ),
-  );
+  return channels.filter((channel) => {
+    if (needle === "group" || needle === "is:group") {
+      return (channel.agentIds?.length ?? 0) > 1;
+    }
+    const inFields = [channel.name, channel.summary, channel.lastMessage].some(
+      (field) => field?.toLowerCase().includes(needle),
+    );
+    const inAgents = channel.agentIds?.some((id) =>
+      id.toLowerCase().includes(needle),
+    );
+    return inFields || inAgents;
+  });
 }
 
 /**
@@ -231,11 +240,14 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     await navigate({ to: "/sign" });
   };
 
+  const [createGroupOpen, setCreateGroupOpen] = useState(false);
+
   return (
+    <>
     <Sidebar {...props}>
       <SidebarHeader className="h-12 p-2">
         <SidebarMenu>
-          <SidebarMenuItem className="flex flex-row gap-1.5">
+          <SidebarMenuItem className="flex flex-row gap-1 items-center">
             <SidebarMenuButton
               className="font-semibold text-[14px] tracking-tighter h-full leading-tight"
               render={(props) => (
@@ -247,6 +259,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             <Button
               size="icon"
               variant="ghost"
+              title="New Channel"
+              aria-label="New Channel"
               render={(props) => (
                 <Link
                   {...props}
@@ -258,6 +272,15 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               )}
             >
               <IconPlus />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              title="Create Multi-Agent Group"
+              aria-label="Create Multi-Agent Group"
+              onClick={() => setCreateGroupOpen(true)}
+            >
+              <IconUsers className="size-4" />
             </Button>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -418,5 +441,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
+    <CreateGroupDialog
+      open={createGroupOpen}
+      onClose={() => setCreateGroupOpen(false)}
+    />
+    </>
   );
 }

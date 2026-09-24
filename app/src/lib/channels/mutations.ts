@@ -139,6 +139,33 @@ export function markChannelReadMutationOptions(queryClient: QueryClient) {
   });
 }
 
+/** Update a channel name or description. */
+export function updateChannelMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (input: {
+      channelId: string;
+      name?: string;
+      description?: string;
+      agentIds?: string[];
+    }): Promise<AgentChannel> => {
+      const response = await client(`/api/channels/${input.channelId}`, {
+        method: "PATCH",
+        body: {
+          name: input.name,
+          description: input.description,
+          agentIds: input.agentIds,
+        },
+        fallback: "Could not update this channel",
+      });
+      return ((await response.json()) as { channel: AgentChannel }).channel;
+    },
+    onSuccess: (channel) => {
+      queryClient.setQueryData(channelKeys.detail(channel.id), channel);
+      queryClient.invalidateQueries({ queryKey: channelKeys.all });
+    },
+  });
+}
+
 /** Soft-delete a channel for everyone in it. The server keeps the transcript; the roster forgets. */
 export function deleteChannelMutationOptions(queryClient: QueryClient) {
   return mutationOptions({
