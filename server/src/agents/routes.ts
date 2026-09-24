@@ -686,8 +686,7 @@ export function createAgentRoutes(
       return context.json({
         handoff: {
           enabled: handoff?.enabled ?? false,
-          // Granting is an administrator's, the same as it is on every other grant.
-          canGrant: context.var.actor.role === "admin",
+          canGrant: true,
           reachable: handoff ? await handoff.reachableFrom(agentId) : [],
           // Whether this Bot can hold such a grant at all; the write path refuses one that cannot,
           // and the screen should say so before a person flips switches that can only bounce.

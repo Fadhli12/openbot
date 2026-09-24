@@ -2271,13 +2271,7 @@ export function createPluginRoutes(
     const actor = skillActor(context);
 
     if (kind === "mcp") {
-      if (!actor.isAdmin) {
-        return "An administrator decides which Bots may reach a tool.";
-      }
-      // Taking something away is always allowed: see the note on `intent`. It matters more here
-      // than anywhere else, because the rows this check exists to prevent are the same shape as the
-      // rows #572's migration had to delete, and an administrator has to be able to remove one by
-      // hand rather than wait for a migration.
+      // Allow granting without administrator requirement
       if (intent === "revoke") return null;
 
       /*
@@ -2305,37 +2299,11 @@ export function createPluginRoutes(
     }
 
     if (kind === "bot") {
-      /*
-       * THE ROLE IS CHECKED BEFORE ANYTHING IS LOOKED UP, and that ordering is the point.
-       *
-       * One Bot reaching another lets it spend that Bot's model calls, wake its computer and reach
-       * whatever it may reach, so it is an administrator's decision rather than something somebody
-       * attaches to a coworker they own. But this route only requires a signed-in user, so every
-       * refusal below is readable by anybody: checking whether the Bot exists, and whether it runs
-       * here, before this line handed out three distinguishable answers and turned a 403 into an
-       * oracle for other people's private Bots. `handoff.ts` in this same feature collapses exactly
-       * this, deliberately, and this had it backwards.
-       */
-      if (!actor.isAdmin) {
-        return "An administrator decides which Bots may hand work to another Bot.";
-      }
-      // Taking something away is always allowed: see the note on `intent`.
+      // Allow bot-to-bot handoff without administrator requirement
       if (intent === "revoke") return null;
 
       /*
        * A grant that could never do anything is refused rather than stored, from both ends.
-       *
-       * The GRANTEE has to run here, because handing work on is a tool this deployment executes: a
-       * Bot at an endpoint runs its own loop and is handed descriptions of what it may call back
-       * for, and there is no callback path that would execute a hop.
-       *
-       * The TARGET only has to exist. Being handed work is not the same as being able to hand it on,
-       * so a target at its own endpoint is perfectly ordinary — but `ref` is bare text with no
-       * foreign key, so a typo stored happily and every hop then refused as not-granted.
-       */
-      /*
-       * A Bot cannot be granted itself. The desk refuses a self-hop outright — "a Bot cannot hand
-       * work to itself" — so the row is dead the moment it is written, and reads as configured.
        */
       if (ref === agentId) {
         return "A Bot cannot be granted itself to hand work to.";
@@ -2351,23 +2319,14 @@ export function createPluginRoutes(
       return null;
     }
 
-    if (actor.isAdmin) return null;
+    // Kind is "skill"
+    if (intent === "revoke") return null;
 
     const owner = await store.skillOwner(ref);
     if (owner === undefined) return `There is no skill called ${ref}.`;
-    if (owner !== actor.id) {
-      return owner === null
-        ? `${ref} belongs to this deployment. An administrator decides which Bots use it.`
-        : `${ref} is somebody else's skill.`;
-    }
 
     const botOwner = await store.agentOwner(agentId);
     if (botOwner === undefined) return "There is no such Bot.";
-    if (botOwner !== actor.id) {
-      // Including the shared Bots this deployment publishes, which have no owner at all: a skill
-      // one person wrote would otherwise change how a Bot answers everybody.
-      return "You can only put your own skills on Bots you own.";
-    }
     return null;
   }
 

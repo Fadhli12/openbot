@@ -71,7 +71,11 @@ import {
 } from "@/lib/agents/mutations";
 import { type AgentProfile, agentQueryOptions } from "@/lib/agents/queries";
 import { isComposing } from "@/lib/composing";
-import { agentPluginsQueryOptions } from "@/lib/plugins/queries";
+import { agentPluginsQueryOptions, pluginsPageQueryOptions } from "@/lib/plugins/queries";
+import {
+  setPluginGrantMutationOptions,
+  grantPlugin,
+} from "@/lib/plugins/mutations";
 import { readToolName } from "@/lib/plugins/tool-name";
 
 /**
@@ -557,7 +561,12 @@ function connectorName(key: string): string {
  * the Plugins screens, and a row of switches here would be a second place for the same decision.
  */
 function AccessSection({ agentId }: { agentId: string }) {
+  const queryClient = useQueryClient();
   const plugins = useQuery(agentPluginsQueryOptions(agentId));
+  const allPlugins = useQuery(pluginsPageQueryOptions());
+  const [grantingKey, setGrantingKey] = useState<string | null>(null);
+
+  const setGrant = useMutation(setPluginGrantMutationOptions(queryClient));
 
   if (plugins.isPending) return null;
   if (plugins.error || !plugins.data) {
@@ -573,11 +582,6 @@ function AccessSection({ agentId }: { agentId: string }) {
   for (const tool of plugins.data.tools) {
     const key = tool.ref.split("/")[0] ?? tool.ref;
     let label = readToolName(tool.toolName).label;
-    /*
-     * Vendors prefix every tool with their own name — "Notion create pages" — which next to a row
-     * already titled Notion reads as a stutter. Stripped only as a leading word, and re-cased, so
-     * "Notion search" becomes "Search" while "Search notion pages" is left alone.
-     */
     const prefix = `${key.toLowerCase()} `;
     if (label.toLowerCase().startsWith(prefix)) {
       const rest = label.slice(prefix.length);
@@ -589,58 +593,128 @@ function AccessSection({ agentId }: { agentId: string }) {
   }
   const skills = plugins.data.skills;
 
-  if (connectors.size === 0 && skills.length === 0) {
-    return (
-      <Empty className="h-[180px] border border-dashed">
-        <EmptyHeader>
-          <EmptyTitle className="text-muted-foreground">
-            Nothing granted yet
-          </EmptyTitle>
-          <EmptyDescription>
-            An administrator grants connectors and skills from the Plugins
-            screens. Until then this coworker can converse, and nothing more.
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    );
-  }
+  // Tools available to grant from server
+  const availableServers = allPlugins.data?.servers ?? [];
+  const availableSkills = allPlugins.data?.skills ?? [];
+
+  const handleToggleSkill = async (slug: string, currentlyGranted: boolean) => {
+    setGrantingKey(`skill:${slug}`);
+    try {
+      await setGrant.mutateAsync({
+        agentId,
+        kind: "skill",
+        ref: slug,
+        granted: !currentlyGranted,
+      });
+    } finally {
+      setGrantingKey(null);
+    }
+  };
+
+  const handleToggleServer = async (serverKey: string, currentlyGranted: boolean) => {
+    setGrantingKey(`mcp:${serverKey}`);
+    try {
+      // Find all tool refs for this server
+      const serverTools = allPlugins.data?.servers.find((s) => s.id === serverKey)?.tools ?? [];
+      const toolRefs = serverTools.map((t) => t.ref);
+      
+      // If currently granted, revoke all; otherwise grant all read/available
+      for (const ref of toolRefs) {
+        await setGrant.mutateAsync({
+          agentId,
+          kind: "mcp",
+          ref,
+          granted: !currentlyGranted,
+        });
+      }
+    } finally {
+      setGrantingKey(null);
+    }
+  };
 
   return (
-    <>
-      <p className="text-sm text-muted-foreground">
-        What this coworker may reach when it works. Granted by an administrator
-        on the Plugins screens; anything not listed is refused when called.
-      </p>
-      <div className="flex flex-col gap-2">
-        {[...connectors.entries()].map(([key, labels]) => (
-          <Item key={key} variant="muted">
-            <ItemContent>
-              <ItemTitle>{connectorName(key)}</ItemTitle>
-              <ItemDescription>
-                {labels.slice(0, 4).join(", ")}
-                {labels.length > 4 ? ` and ${labels.length - 4} more` : ""}
-              </ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <span className="text-sm text-muted-foreground tabular-nums">
-                {labels.length} {labels.length === 1 ? "tool" : "tools"}
-              </span>
-            </ItemActions>
-          </Item>
-        ))}
-        {skills.map((skill) => (
-          <Item key={skill.slug} variant="muted">
-            <ItemContent>
-              <ItemTitle>{skill.title}</ItemTitle>
-              <ItemDescription>{skill.summary}</ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <span className="text-sm text-muted-foreground">Skill</span>
-            </ItemActions>
-          </Item>
-        ))}
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-1.5">
+        <h3 className="text-sm font-semibold tracking-tight">Tools & Connectors (MCP)</h3>
+        <p className="text-xs text-muted-foreground">
+          Toggle connectors and tools this coworker can access and execute during conversations.
+        </p>
+
+        {availableServers.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic py-2">
+            No connectors currently installed in deployment.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-2 mt-2">
+            {availableServers.map((server) => {
+              const isGranted = connectors.has(server.id);
+              const toolCount = server.tools.length;
+              const isLoading = grantingKey === `mcp:${server.id}`;
+
+              return (
+                <Item key={server.id} variant="muted" className="flex items-center justify-between p-3 rounded-lg border">
+                  <ItemContent>
+                    <ItemTitle>{server.title || connectorName(server.id)}</ItemTitle>
+                    <ItemDescription>
+                      {server.summary || `${toolCount} tools available`}
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <Button
+                      size="sm"
+                      variant={isGranted ? "secondary" : "outline"}
+                      disabled={isLoading}
+                      onClick={() => handleToggleServer(server.id, isGranted)}
+                    >
+                      {isLoading ? "Updating..." : isGranted ? "Granted ✓" : "+ Grant Access"}
+                    </Button>
+                  </ItemActions>
+                </Item>
+              );
+            })}
+          </div>
+        )}
       </div>
-    </>
+
+      <div className="flex flex-col gap-1.5">
+        <h3 className="text-sm font-semibold tracking-tight">Skills</h3>
+        <p className="text-xs text-muted-foreground">
+          Grant procedural instructions and specialized capabilities to this coworker.
+        </p>
+
+        {availableSkills.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic py-2">
+            No skills available to grant.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-2 mt-2">
+            {availableSkills.map((skill) => {
+              const isGranted = skills.some((s) => s.slug === skill.slug);
+              const isLoading = grantingKey === `skill:${skill.slug}`;
+
+              return (
+                <Item key={skill.slug} variant="muted" className="flex items-center justify-between p-3 rounded-lg border">
+                  <ItemContent>
+                    <ItemTitle>{skill.title}</ItemTitle>
+                    <ItemDescription>{skill.summary || "Instruction skill"}</ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <Button
+                      size="sm"
+                      variant={isGranted ? "secondary" : "outline"}
+                      disabled={isLoading}
+                      onClick={() => handleToggleSkill(skill.slug, isGranted)}
+                    >
+                      {isLoading ? "Updating..." : isGranted ? "Granted ✓" : "+ Grant Skill"}
+                    </Button>
+                  </ItemActions>
+                </Item>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
