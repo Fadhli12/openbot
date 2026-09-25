@@ -218,3 +218,82 @@ skills:
       save_bot once, at the end. It is not a way to show a draft: it puts a card in front of the
       person and nothing is created unless they press the button.
     tools: []
+
+  - slug: synthesize-discussion
+    title: Synthesize group discussion
+    summary: Synthesize a multi-agent debate or channel transcript into agreements, trade-offs, and an action plan.
+    instructions: >-
+      You are synthesizing a multi-agent discussion or complex conversation thread.
+      Analyze all prior viewpoints, arguments, and counter-proposals in the transcript.
+      Structure your response into four clear sections:
+      1. Executive Overview: A concise 2-sentence summary of the core objective and overall outcome.
+      2. Consensus & Key Agreements: Every point where participants reached shared alignment.
+      3. Trade-offs & Divergent Perspectives: Critical tensions, alternative approaches, or unresolved trade-offs identified.
+      4. Actionable Next Steps: Concrete, prioritized steps required to execute the decision, noting specific roles where applicable.
+      Remain strictly objective and factual. Do not invent consensus where debate is still active.
+    tools: []
+
+  - slug: plan-and-decompose
+    title: Plan and decompose mission
+    summary: Break down a complex project or objective into ordered phases, subtasks, and role delegations.
+    instructions: >-
+      You are planning a multi-stage project or complex mission.
+      1. Clarify the definition of done: State what success looks like in verifiable terms.
+      2. Identify dependencies: Determine which prerequisites must be satisfied before subsequent stages can begin.
+      3. Break down into phases: Group work into logical, ordered phases (e.g. Discovery & Audit, Core Architecture, Implementation, Verification & Hardening).
+      4. Specify subtasks: For each phase, list actionable subtasks with clear criteria for completion.
+      5. Delegate to specialist agents: Recommend which agent or persona (e.g. Architect, Security Reviewer, Test Engineer, Orchestrator) is best suited for each subtask.
+      Keep the plan practical, modular, and directly executable.
+    tools: []
+
+  - slug: code-review-gate
+    title: Rigorous code and security review
+    summary: Audit code diffs, architecture, or proposals for safety, security vulnerabilities, and code quality.
+    instructions: >-
+      Review the provided code, diff, or technical design with high senior-level scrutiny.
+      Evaluate against the following criteria:
+      1. Security & Vulnerabilities: Scan for injection flaws, authentication/authorization bypasses, unvalidated inputs, credential exposure, and secret leaks.
+      2. Correctness & Edge Cases: Identify null pointer exceptions, unhandled error states, concurrency race conditions, and off-by-one errors.
+      3. Architecture & Maintainability: Check adherence to SOLID principles, separation of concerns, dead code, and maintainability.
+      4. Performance & Efficiency: Note unindexed database queries, unnecessary network round-trips, memory leaks, and blocking operations.
+      Structure findings by severity: Critical (must fix), High, Medium, and Nit/Suggestion. For every issue found, explain the risk and provide the exact remediation code.
+    tools: []
+
+  - slug: system-troubleshooter
+    title: Root cause debugging and troubleshooting
+    summary: Investigate a bug, system failure, or error log using structured scientific hypothesis testing.
+    instructions: >-
+      You are performing root-cause investigation on a system issue or bug.
+      Follow this strict diagnostic protocol:
+      1. Understand the symptom: Distinguish between the observed failure and the underlying cause. Isolate the exact error message, stack trace, and environment context.
+      2. Formulate hypotheses: List the 2-3 most probable causes ranked by likelihood.
+      3. Validate against evidence: Test each hypothesis against available logs, code paths, and configurations. Eliminate causes that contradict known facts.
+      4. Propose minimal fix: Provide the simplest, least disruptive patch that permanently cures the root cause without side effects.
+      5. Verification steps: Explain exactly how to reproduce the fix and confirm the bug is resolved.
+    tools: []
+
+  - slug: api-spec-designer
+    title: Design API specification
+    summary: Design clean, idiomatic, and secure REST or RPC API contracts with schema validation.
+    instructions: >-
+      Design a robust and modern API interface for the feature requested.
+      Ensure the specification includes:
+      1. Endpoint routing: Idiomatic HTTP method, URI path, and query parameter definitions.
+      2. Request payload schema: Strict typing, required vs optional fields, and validation boundaries.
+      3. Response schemas: Success status codes (200, 201, 204) with response shapes, and realistic error responses (400, 401, 403, 404, 409, 422, 500).
+      4. Idempotency & Concurrency: Specify idempotency keys, ETags, or lock mechanics where state mutations occur.
+      5. Security & Rate-limiting: Detail authentication requirements, permission scopes, and rate-limiting considerations.
+    tools: []
+
+  - slug: test-design
+    title: Design comprehensive test suite
+    summary: Design unit, integration, and edge-case test suites ensuring comprehensive test coverage.
+    instructions: >-
+      Design a rigorous and comprehensive test suite for the component or feature under test.
+      Cover the testing pyramid:
+      1. Happy Path: Verify that intended behavior succeeds with valid inputs.
+      2. Edge Cases & Boundary Values: Test empty inputs, maximum limits, boundary values, zero values, and special characters.
+      3. Error Handling & Failure Modes: Confirm that upstream timeouts, database errors, network disconnects, and invalid auth reject cleanly with appropriate error messages.
+      4. State & Side Effects: Verify that state changes, database records, and event emissions occur accurately.
+      Provide realistic test code examples (using Bun test, Jest, PyTest, or PHPUnit as appropriate for the stack).
+    tools: []

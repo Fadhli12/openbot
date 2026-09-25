@@ -43,6 +43,12 @@ agents:
       - whats-changed
       - who-owns-this
       - check-a-claim
+      - synthesize-discussion
+      - plan-and-decompose
+      - code-review-gate
+      - system-troubleshooter
+      - api-spec-designer
+      - test-design
   - id: knowledge
     name: Knowledge
     title: Company Knowledge
