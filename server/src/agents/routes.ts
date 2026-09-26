@@ -13,6 +13,7 @@ import {
   ManagedAgentUnavailableError,
   ProtectedAgentError,
 } from "./profile-store";
+import { AgentMemoryStore } from "./memory-store";
 import type {
   AgentActor,
   AgentProfile,
@@ -239,54 +240,15 @@ export function createAgentRoutes(
   allowPrivateHosts = false,
   /** Where a Bot's own refusal is recorded. Absent in tests that do not care about the trail. */
   auditStore?: AuditStore,
-  /**
-   * Private addresses this deployment named as acceptable for an agent to live at.
-   *
-   * Separate from `allowPrivateHosts` on purpose: that one opens the network, this one opens an
-   * address. A hosted deployment sets this and leaves the other off.
-   */
   allowedHosts: ReadonlySet<string> = new Set(),
-  /**
-   * Which Bots a Bot may hand work to, for the screen that grants it.
-   *
-   * A named object rather than another positional argument: every parameter above this one is
-   * optional, so a misplaced one typechecks and silently does nothing, and this list is already at
-   * the length where that stops being hypothetical.
-   *
-   * Absent in a deployment with no plugin store, which is a deployment where no Bot may address any
-   * other. The screen is then told the capability is off rather than shown a control that grants
-   * nothing.
-   */
   handoff?: {
-    /** Whether the deployment's own caps leave the capability switched on at all. */
     enabled: boolean;
-    /** The Bots this one may address today, read per call so a revoked grant stops showing. */
     reachableFrom: (agentId: string) => Promise<readonly string[]>;
-    /**
-     * Whether this Bot can be a grantee at all — the handing-on tool executes inside this
-     * deployment's own run loop, so only a Bot that runs in it can be offered one. Exposed so the
-     * screen can say that once, instead of letting every switch fail with the same refusal.
-     * Optional so a caller without a plugin store answers "no" rather than crashing the read.
-     */
     runsHere?: (agentId: string) => Promise<boolean | undefined>;
   },
-  /**
-   * Whether a coworker can run on this deployment's own Bot, i.e. be created with no endpoint.
-   *
-   * The store already refuses such a create on a deployment with no managed Bot; this exists so a
-   * screen can say so before somebody fills in three steps of a form that was always going to fail.
-   */
   builtInAvailable = false,
-  /**
-   * The managed Bot's own address, so a coworker created without an endpoint can be told apart.
-   *
-   * Creation bakes this address into the coworker's stored configuration, and afterwards nothing in
-   * the row says whether a person supplied it. The difference matters to exactly one screen: a
-   * coworker running here calls tools back with the deployment's own credential and needs no setup,
-   * while one a person hosts needs a callback token put into their process. Without this flag the
-   * dialog nagged built-in coworkers about a credential they never needed.
-   */
   managedEndpoint?: string,
+  memoryStore?: AgentMemoryStore,
 ) {
   /** The dto with the one fact only this closure knows: whether the coworker runs on our own Bot. */
   const dto = (actor: AgentActor, agent: AgentProfile) => ({
@@ -695,6 +657,65 @@ export function createAgentRoutes(
             : false,
         },
       });
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  // Long-term Memory routes for Coworker Self-Learning
+  routes.get("/:agentId/memories", requireUser, async (context) => {
+    if (!memoryStore) return context.json({ memories: [] });
+    const agentId = context.req.param("agentId");
+    try {
+      const memories = await memoryStore.listForAgent(
+        agentId,
+        context.var.actor.id,
+      );
+      return context.json({ memories });
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  routes.post("/:agentId/memories", requireUser, async (context) => {
+    if (!memoryStore) {
+      return context.json({ error: "Memory store not enabled" }, 503);
+    }
+    const agentId = context.req.param("agentId");
+    const body = (await context.req.json().catch(() => null)) as {
+      content?: string;
+      category?: any;
+      confidence?: number;
+    } | null;
+
+    if (!body?.content?.trim()) {
+      return context.json({ error: "Content is required" }, 400);
+    }
+
+    try {
+      const item = await memoryStore.addMemory({
+        agentId,
+        userId: context.var.actor.id,
+        content: body.content.trim(),
+        category: body.category,
+        confidence: body.confidence,
+      });
+      return context.json({ memory: item }, 201);
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
+  routes.delete("/:agentId/memories/:memoryId", requireUser, async (context) => {
+    if (!memoryStore) {
+      return context.json({ error: "Memory store not enabled" }, 503);
+    }
+    const agentId = context.req.param("agentId");
+    const memoryId = context.req.param("memoryId");
+
+    try {
+      await memoryStore.removeMemory(memoryId, agentId);
+      return context.body(null, 204);
     } catch (error) {
       return mapStoreError(context, error);
     }

@@ -7,6 +7,7 @@
 import {
   boolean,
   index,
+  integer,
   pgEnum,
   pgTable,
   primaryKey,
@@ -157,3 +158,37 @@ export const routineRuns = pgTable(
     index("routine_runs_by_routine_idx").on(table.routineId, table.startedAt),
   ],
 );
+
+export const agentMemoryCategory = pgEnum("agent_memory_category", [
+  "fact",
+  "learning",
+  "preference",
+  "planning",
+  "critique",
+]);
+
+export const agentMemories = pgTable(
+  "agent_memories",
+  {
+    id: text("id").primaryKey(),
+    agentId: text("agent_id")
+      .notNull()
+      .references(() => agents.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "cascade",
+    }),
+    category: agentMemoryCategory("category").notNull().default("learning"),
+    content: text("content").notNull(),
+    sourceContext: text("source_context"),
+    confidence: integer("confidence").notNull().default(100),
+    lastRecalledAt: timestamp("last_recalled_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    index("agent_memories_agent_idx").on(table.agentId, table.category),
+    index("agent_memories_created_idx").on(table.createdAt),
+    index("agent_memories_user_idx").on(table.agentId, table.userId),
+  ],
+);
+

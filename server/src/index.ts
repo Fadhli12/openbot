@@ -53,6 +53,7 @@ import {
   summariseClaimedChannels,
 } from "./channels/summary";
 import { createThreadIdentity } from "./channels/thread-identity";
+import { AgentMemoryStore } from "./agents/memory-store";
 import { createChannelTitler } from "./channels/titler";
 import { createSandboxedStore } from "./components/sandboxed";
 import { createComponentStore } from "./components/store";
@@ -604,8 +605,13 @@ const userInstructionsStore = createUserInstructionsStore(database);
  * value captured at boot would serve the whole deployment whatever the first person to sign in had
  * written.
  */
-const loadInstructionsForActor = (actorId: string) => () =>
-  userInstructionsStore.read(actorId);
+const memoryStore = new AgentMemoryStore(database);
+
+const loadInstructionsForActor = (actorId: string) => async () => {
+  const instructions = await userInstructionsStore.read(actorId);
+  const memoryPrompt = await memoryStore.getContextPromptForAgent("general-assistant", actorId);
+  return [instructions, memoryPrompt].filter(Boolean).join("\n\n");
+};
 
 /*
  * The file behind an attachment reference, read when a turn turns out to name one.

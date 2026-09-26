@@ -11,6 +11,7 @@ import {
 import type { BotAccessCheck } from "./agents/profile-policy";
 import type { AgentProfileStore } from "./agents/profile-store";
 import { createAgentRoutes } from "./agents/routes";
+import { AgentMemoryStore } from "./agents/memory-store";
 import {
   type AuditEventType,
   type AuditInitiator,
@@ -1142,6 +1143,7 @@ export function createApp(
         // The managed Bot's address, so a coworker created without an endpoint — which creation
         // stores as running at this address — can be told apart from one a person hosts.
         config.managedAgent?.endpoint?.toString(),
+        attachmentDatabase ? new AgentMemoryStore(attachmentDatabase) : undefined,
       ),
     );
     // Choosing a coworker for an untagged message needs the same permission-filtered roster the
