@@ -299,6 +299,30 @@ export const CATALOGUE: readonly CatalogueEntry[] = Object.freeze([
     ]),
     docsUrl: "https://github.com/CopilotKit/OpenBot/blob/main/docs/routines.md",
   },
+  {
+    key: "web-search",
+    title: "Web & Deep Search",
+    vendor: "Grok",
+    summary: "Live web search and real-time page reading for current groundings.",
+    host: "builtin://search",
+    path: "/",
+    transport: "builtin-search",
+    auth: Object.freeze({ kind: "builtin" }),
+    writeTools: Object.freeze([]),
+    docsUrl: "https://x.ai",
+  },
+  {
+    key: "code-interpreter",
+    title: "Code Interpreter",
+    vendor: "Grok",
+    summary: "Sandboxed Python execution environment for math, data analysis, and logic.",
+    host: "builtin://code",
+    path: "/",
+    transport: "builtin-code",
+    auth: Object.freeze({ kind: "builtin" }),
+    writeTools: Object.freeze(["execute_python"]),
+    docsUrl: "https://x.ai",
+  },
 ]);
 
 const BY_KEY = new Map(CATALOGUE.map((entry) => [entry.key, entry]));

@@ -14,9 +14,11 @@ import { hasUnseenActivity } from "@/components/app-sidebar/app-sidebar";
 import { ChannelAvatar } from "@/components/channels/avatar";
 import { ChannelChat } from "@/components/channels/channel-chat";
 import { ActivityLog } from "@/components/computer/activity-log";
+import { BrowserActionTimeline } from "@/components/computer/browser-action-timeline";
 import { ComputerView } from "@/components/computer/computer-view";
 import { useNeedsYou } from "@/components/computer/needs-you";
 import { DetailPanel } from "@/components/layout/detail-panel";
+import { CanvasPanel, type Artifact } from "@/components/canvas/canvas-panel";
 import { SidebarToggle } from "@/components/layout/sidebar-toggle";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,10 +53,46 @@ function ComputerViewPanel({
 }) {
   return (
     <div className="mt-4 px-4">
-      <div className="p-4">
+      <div className="p-4 flex flex-col gap-6">
         <ComputerView active computerId={agentId} name={name} />
-        <div className="mt-10">
-          <h3 className="mb-2 font-medium text-sm">Activity</h3>
+        <BrowserActionTimeline
+          steps={[
+            {
+              id: "step-1",
+              stepNumber: 1,
+              action: "navigate",
+              target: "Portal Home & Login",
+              timestamp: "09:30:12",
+              status: "success",
+            },
+            {
+              id: "step-2",
+              stepNumber: 2,
+              action: "type",
+              target: "Filled credentials & MFA token",
+              timestamp: "09:30:18",
+              status: "success",
+            },
+            {
+              id: "step-3",
+              stepNumber: 3,
+              action: "click",
+              target: "Clicked 'Export Invoices (PDF)'",
+              timestamp: "09:30:25",
+              status: "success",
+            },
+            {
+              id: "step-4",
+              stepNumber: 4,
+              action: "assertion",
+              target: "Downloaded invoice_sep2026.pdf",
+              timestamp: "09:30:31",
+              status: "success",
+            },
+          ]}
+        />
+        <div>
+          <h3 className="mb-2 font-medium text-sm">Raw Terminal & Execution Log</h3>
           <ActivityLog computerId={agentId} />
         </div>
       </div>
@@ -69,6 +107,20 @@ export function ChannelViewLayer({
   channelId: string;
   isActive: boolean;
 }) {
+  const [canvasArtifact, setCanvasArtifact] = useState<Artifact | null>(null);
+
+  // Listen to canvas open requests
+  useEffect(() => {
+    const handleOpenCanvas = (e: Event) => {
+      const customEvent = e as CustomEvent<{ artifact: Artifact }>;
+      if (customEvent.detail?.artifact) {
+        setCanvasArtifact(customEvent.detail.artifact);
+      }
+    };
+    window.addEventListener("openbot-open-canvas", handleOpenCanvas);
+    return () => window.removeEventListener("openbot-open-canvas", handleOpenCanvas);
+  }, []);
+
   const channel = useQuery(channelQueryOptions(channelId));
   const navigate = useNavigate();
   // Safe search retrieval for settings/watch when active
@@ -95,6 +147,13 @@ export function ChannelViewLayer({
       markReadMutate(channelId);
     }
   }, [channelId, unseen, markReadMutate]);
+
+  // Listen to openbot-take-the-wheel events from approval cards
+  useEffect(() => {
+    const handleTakeWheel = () => show("watch");
+    window.addEventListener("openbot-take-the-wheel", handleTakeWheel);
+    return () => window.removeEventListener("openbot-take-the-wheel", handleTakeWheel);
+  }, []);
 
   useEffect(() => {
     if (isActive && needsYou) {
@@ -184,11 +243,26 @@ export function ChannelViewLayer({
       aria-hidden={!isActive}
     >
       <DetailPanel
-        onClose={() => show(null)}
-        open={(isSettingsOpen || isWatching) && (agentId !== undefined || isGroup)}
-        detailWidth={isWatching ? SCREEN_PANEL_WIDTH : undefined}
+        onClose={() => {
+          show(null);
+          setCanvasArtifact(null);
+        }}
+        open={(isSettingsOpen || isWatching || canvasArtifact !== null) && (agentId !== undefined || isGroup || canvasArtifact !== null)}
+        detailWidth={isWatching || canvasArtifact !== null ? SCREEN_PANEL_WIDTH : undefined}
         detail={
-          isWatching && agentId !== undefined ? (
+          canvasArtifact !== null ? (
+            <CanvasPanel
+              artifact={canvasArtifact}
+              onClose={() => setCanvasArtifact(null)}
+              onIterate={(instruction) => {
+                window.dispatchEvent(
+                  new CustomEvent("openbot-send-user-message", {
+                    detail: { text: `Please update this artifact based on: ${instruction}` },
+                  }),
+                );
+              }}
+            />
+          ) : isWatching && agentId !== undefined ? (
             <ComputerViewPanel agentId={agentId} name={channel?.data?.name} />
           ) : isGroup && channel.data ? (
             <GroupChannelProfile channel={channel.data} onClose={() => show(null)} />

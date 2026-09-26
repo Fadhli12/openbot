@@ -39,3 +39,21 @@ export function deleteRoutineMutationOptions(queryClient: QueryClient) {
     onSuccess: () => invalidateRoutines(queryClient),
   });
 }
+
+export function createRoutineMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: (variables: {
+      agentId: string;
+      channelId: string;
+      instruction: string;
+      cron: string;
+      timezone?: string;
+    }) =>
+      client("/api/routines", "routine", {
+        method: "POST",
+        body: variables,
+        fallback: "Could not create routine",
+      }),
+    onSuccess: () => invalidateRoutines(queryClient),
+  });
+}

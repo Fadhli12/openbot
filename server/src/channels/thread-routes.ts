@@ -50,12 +50,40 @@ export function createThreadRoutes(
    * `POST /mint` needs no reader and is unaffected either way.
    */
   readThread?: ThreadReader,
+  intelligenceClient?: any,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
   routes.post("/mint", requireUser, (context) =>
     context.json({ threadId: identity.mint() }),
   );
+
+  // Endpoint to forcibly unlock a stuck thread if needed
+  routes.post("/:threadId/unlock", requireUser, async (context) => {
+    const threadId = context.req.param("threadId");
+    if (!PLAUSIBLE_THREAD_ID.test(threadId)) {
+      return context.json({ error: "Not a thread id." }, 400);
+    }
+    if (!intelligenceClient) {
+      return context.json({ error: "Intelligence client unavailable." }, 503);
+    }
+    try {
+      const inspectRes = await intelligenceClient.getThreadMessages({
+        threadId,
+        userId: context.var.actor.id,
+      });
+      // Try to release any active locks
+      await intelligenceClient.ɵcleanupThreadLock({
+        threadId,
+        runId: "",
+      }).catch(() => {});
+      return context.json({ success: true, threadId });
+    } catch (err) {
+      return context.json({
+        error: err instanceof Error ? err.message : String(err),
+      }, 500);
+    }
+  });
 
   if (readThread) {
     /*

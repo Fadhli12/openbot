@@ -741,7 +741,23 @@ export function ChannelChat({
       // Both surfaces fall back to the same sentence, from the same place, so a person who uses
       // both is not told two different things about the same silence.
       onRunErrorEvent: ({ event }) => fail(stoppedReason(event?.message)),
-      onRunFailed: ({ error }) => fail(stoppedReason(error)),
+      onRunFailed: ({ error }) => {
+        const errorMsg =
+          error instanceof Error
+            ? error.message
+            : typeof error === "string"
+              ? error
+              : "";
+        if (
+          errorMsg.includes("agent_thread_locked") ||
+          errorMsg.includes("is locked")
+        ) {
+          void fetch(`/api/threads/${encodeURIComponent(channel.threadId)}/unlock`, {
+            method: "POST",
+          }).catch(() => {});
+        }
+        fail(stoppedReason(error));
+      },
       onRunFinishedEvent: () => {
         const wasOurs = awaitingReply.current;
         awaitingReply.current = false;
@@ -777,6 +793,18 @@ export function ChannelChat({
    */
   const askFromComponent = useCallback((text: string) => {
     void sayRef.current(text).catch(() => undefined);
+  }, []);
+
+  // Handle action approval custom events from transcript cards
+  useEffect(() => {
+    const handleApprovalSend = (e: Event) => {
+      const customEvent = e as CustomEvent<{ text: string }>;
+      if (customEvent.detail?.text) {
+        void sayRef.current(customEvent.detail.text).catch(() => undefined);
+      }
+    };
+    window.addEventListener("openbot-send-user-message", handleApprovalSend);
+    return () => window.removeEventListener("openbot-send-user-message", handleApprovalSend);
   }, []);
 
   /**

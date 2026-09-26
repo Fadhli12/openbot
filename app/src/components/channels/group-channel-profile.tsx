@@ -43,9 +43,14 @@ export function GroupChannelProfile({
   const [rounds, setRounds] = useState(initialRounds);
   
   // Extract mode from description if present
-  const modeMatch = description.match(/\[mode:(collaborative|debate|brainstorm)\]/i);
+  const modeMatch = description.match(/\[mode:(collaborative|debate|brainstorm|planning)\]/i);
   const initialMode = modeMatch ? modeMatch[1].toLowerCase() : "collaborative";
   const [mode, setMode] = useState(initialMode);
+
+  // Extract coordinator from description if present
+  const coordMatch = description.match(/\[coordinator:([^\]]+)\]/i);
+  const initialCoordinator = coordMatch ? coordMatch[1].trim() : "auto";
+  const [coordinator, setCoordinator] = useState(initialCoordinator);
   
   // Extract agent models from description
   // Format: [agent_model:agentId:modelId]
@@ -64,6 +69,7 @@ export function GroupChannelProfile({
   const displayDescription = description
     .replace(/\s*\[rounds:\d+\]\s*/gi, "")
     .replace(/\s*\[mode:[^\]]+\]\s*/gi, "")
+    .replace(/\s*\[coordinator:[^\]]+\]\s*/gi, "")
     .replace(/\s*\[agent_model:[^:]+:[^\]]+\]\s*/gi, "")
     .trim();
 
@@ -78,7 +84,8 @@ export function GroupChannelProfile({
     e.preventDefault();
     setSavedMessage(null);
     try {
-      const metadata = `[rounds:${rounds}] [mode:${mode}]`;
+      const coordTag = coordinator && coordinator !== "auto" ? `[coordinator:${coordinator}]` : "";
+      const metadata = `[rounds:${rounds}] [mode:${mode}] ${coordTag}`.trim();
       const agentModelTags = Object.entries(agentModels)
         .filter(([agentId, modelId]) => currentAgentIds.includes(agentId) && modelId)
         .map(([agentId, modelId]) => `[agent_model:${agentId}:${modelId}]`)
@@ -203,8 +210,32 @@ export function GroupChannelProfile({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="collaborative">Collaborative Discussion (Standard)</SelectItem>
+              <SelectItem value="planning">Collaborative Planning & Roadmap</SelectItem>
               <SelectItem value="debate">Socratic Debate & Stress-Testing</SelectItem>
               <SelectItem value="brainstorm">Divergent Brainstorming</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Lead Coordinator Selection */}
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="group-coordinator" className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Lead Coordinator (Promote to Single Synthesis)
+          </label>
+          <Select value={coordinator} onValueChange={(v) => v && setCoordinator(v)}>
+            <SelectTrigger id="group-coordinator">
+              <SelectValue placeholder="Automatic (First speaker)" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">Automatic (First speaker)</SelectItem>
+              {currentAgentIds.map((id) => {
+                const p = allProfiles?.find((agent) => agent.id === id);
+                return (
+                  <SelectItem key={id} value={id}>
+                    👑 {p?.name ?? id}
+                  </SelectItem>
+                );
+              })}
             </SelectContent>
           </Select>
         </div>

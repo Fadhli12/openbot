@@ -154,3 +154,48 @@ export function setHandoffGrantMutationOptions(queryClient: QueryClient) {
     onSuccess: () => invalidateAgents(queryClient),
   });
 }
+
+export function createAgentMemoryMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (variables: {
+      agentId: string;
+      content: string;
+      category?: string;
+      confidence?: number;
+    }) => {
+      return client(`/api/agents/${encodeURIComponent(variables.agentId)}/memories`, "memory", {
+        method: "POST",
+        body: {
+          content: variables.content,
+          category: variables.category,
+          confidence: variables.confidence,
+        },
+        fallback: "Failed to save memory",
+      });
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: agentKeys.memories(variables.agentId),
+      });
+    },
+  });
+}
+
+export function deleteAgentMemoryMutationOptions(queryClient: QueryClient) {
+  return mutationOptions({
+    mutationFn: async (variables: { agentId: string; memoryId: string }) => {
+      return client(
+        `/api/agents/${encodeURIComponent(variables.agentId)}/memories/${encodeURIComponent(variables.memoryId)}`,
+        {
+          method: "DELETE",
+          fallback: "Failed to delete memory",
+        },
+      );
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: agentKeys.memories(variables.agentId),
+      });
+    },
+  });
+}

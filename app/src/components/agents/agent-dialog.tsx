@@ -1,6 +1,7 @@
 import {
   IconAdjustments,
   IconArrowsExchange,
+  IconBrain,
   IconClock,
   IconPencil,
   IconPlugConnected,
@@ -14,6 +15,7 @@ import type { ZodType } from "zod";
 import { AbstractAvatar } from "@/components/agents/abstract-avatar";
 import { CallbackTokenPanel } from "@/components/agents/callback-token-panel";
 import { HandoffPanel } from "@/components/agents/handoff-panel";
+import { AgentMemoriesPanel } from "@/components/agents/memories-panel";
 import { RoutinesList } from "@/components/routines/routines-list";
 import { Button } from "@/components/ui/button";
 import {
@@ -112,6 +114,7 @@ export function AgentDialog({
 
 const SECTIONS = [
   { id: "general", name: "General", icon: IconUser },
+  { id: "memory", name: "Memory", icon: IconBrain },
   { id: "access", name: "Access", icon: IconPuzzle },
   { id: "connection", name: "Connection", icon: IconPlugConnected },
   { id: "handoff", name: "Handoff", icon: IconArrowsExchange },
@@ -225,6 +228,8 @@ function AgentDialogBody({ agentId }: { agentId: string }) {
           <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-6 pb-6">
             {section === "general" ? (
               <GeneralSection agentId={agentId} profile={profile} />
+            ) : section === "memory" ? (
+              <AgentMemoriesPanel agentId={agentId} />
             ) : section === "access" ? (
               <AccessSection agentId={agentId} />
             ) : section === "connection" ? (

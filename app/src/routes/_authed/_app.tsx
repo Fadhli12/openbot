@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { ChannelLayerContainer } from "@/components/channels/channel-layer-container";
+import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav";
 
 export const Route = createFileRoute("/_authed/_app")({
   component: RouteComponent,
@@ -16,17 +17,20 @@ function RouteComponent() {
   return (
     // One viewport, never scrolls: panes scroll inside it. A growable shell lets the transcript's
     // scroller size against the page, grow it, and grow again.
-    <SidebarShell className="h-svh overflow-hidden" width="340px">
-      <AppSidebar />
-      <main className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
-        <ChannelLayerContainer activeChannelId={activeChannelId} />
-        {/* Render standard non-channel routes (e.g. /channel/new, /settings, /skills, /agents) */}
-        {!activeChannelId && (
-          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-            <Outlet />
-          </div>
-        )}
-      </main>
-    </SidebarShell>
+    <div className="flex flex-col h-svh overflow-hidden">
+      <SidebarShell className="flex-1 min-h-0 overflow-hidden" width="340px">
+        <AppSidebar />
+        <main className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
+          <ChannelLayerContainer activeChannelId={activeChannelId} />
+          {/* Render standard non-channel routes (e.g. /channel/new, /settings, /skills, /agents) */}
+          {!activeChannelId && (
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+              <Outlet />
+            </div>
+          )}
+        </main>
+      </SidebarShell>
+      <MobileBottomNav />
+    </div>
   );
 }

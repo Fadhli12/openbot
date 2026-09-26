@@ -229,6 +229,7 @@ export function CreateGroupDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="collaborative">Collaborative Discussion (Standard)</SelectItem>
+                  <SelectItem value="planning">Collaborative Planning & Roadmap</SelectItem>
                   <SelectItem value="debate">Socratic Debate & Stress-Testing</SelectItem>
                   <SelectItem value="brainstorm">Divergent Brainstorming</SelectItem>
                 </SelectContent>

@@ -6,7 +6,10 @@ import {
   IconSearch,
   IconSettings,
   IconShieldLock,
+  IconTrash,
+  IconUser,
   IconUsers,
+  IconMoon,
 } from "@tabler/icons-react";
 import {
   useInfiniteQuery,
@@ -53,6 +56,7 @@ import {
 } from "@/lib/channels/queries";
 import { useChannelEvents } from "@/lib/channels/use-channel-events";
 import { CreateGroupDialog } from "@/components/channels/create-group-dialog";
+import { ActivityDigestDialog } from "@/components/routines/activity-digest-dialog";
 import { appConfig } from "@/lib/generated/application-config";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
 import { relativeTime } from "@/lib/relative-time";
@@ -241,6 +245,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   };
 
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
+  const [digestOpen, setDigestOpen] = useState(false);
 
   return (
     <>
@@ -272,6 +277,15 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               )}
             >
               <IconPlus />
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              title="While You Were Away (Overnight Activity)"
+              aria-label="While You Were Away (Overnight Activity)"
+              onClick={() => setDigestOpen(true)}
+            >
+              <IconMoon className="size-4" />
             </Button>
             <Button
               size="icon"
@@ -444,6 +458,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     <CreateGroupDialog
       open={createGroupOpen}
       onClose={() => setCreateGroupOpen(false)}
+    />
+    <ActivityDigestDialog
+      open={digestOpen}
+      onClose={() => setDigestOpen(false)}
     />
     </>
   );

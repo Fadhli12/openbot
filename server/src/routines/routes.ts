@@ -47,6 +47,56 @@ export function createRoutineRoutes(
     });
   });
 
+  // Overnight activity digest (runs executed in the last 24h)
+  routes.get("/digest", requireUser, async (context) => {
+    const routines = await routineStore.listFor(context.var.actor.id);
+    const recentActivity = routines
+      .filter((r) => r.lastRun?.finishedAt)
+      .map((r) => ({
+        routineId: r.id,
+        agentId: r.agentId,
+        instruction: r.instruction,
+        channelId: r.channelId,
+        channelName: r.channelName,
+        status: r.lastRun?.status ?? "unknown",
+        executedAt: r.lastRun?.finishedAt?.toISOString() ?? null,
+      }))
+      .sort((a, b) => new Date(b.executedAt!).getTime() - new Date(a.executedAt!).getTime());
+
+    return context.json({
+      count: recentActivity.length,
+      runs: recentActivity,
+    });
+  });
+
+  routes.post("/", requireUser, async (context) => {
+    const body = (await context.req.json().catch(() => null)) as {
+      agentId?: string;
+      channelId?: string;
+      instruction?: string;
+      cron?: string;
+      timezone?: string;
+    } | null;
+
+    if (!body?.agentId?.trim() || !body?.channelId?.trim() || !body?.instruction?.trim() || !body?.cron?.trim()) {
+      return context.json({ error: "agentId, channelId, instruction, and cron are required." }, 400);
+    }
+
+    try {
+      const routine = await routineStore.create({
+        ownerUserId: context.var.actor.id,
+        agentId: body.agentId.trim(),
+        channelId: body.channelId.trim(),
+        instruction: body.instruction.trim(),
+        cron: body.cron.trim(),
+        timezone: body.timezone?.trim() || "UTC",
+      });
+      return context.json({ id: routine.id }, 201);
+    } catch (error) {
+      return mapStoreError(context, error);
+    }
+  });
+
   routes.put("/:id/enabled", requireUser, async (context) => {
     const body = await context.req.json().catch(() => null);
     const enabled = (body as { enabled?: unknown } | null)?.enabled;

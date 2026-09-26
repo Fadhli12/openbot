@@ -66,7 +66,31 @@ export const agentKeys = {
     ["agents", "bot-route-detail", agentId] as const,
   handoff: (agentId: string) => ["agents", "handoff", agentId] as const,
   capabilities: () => ["agents", "capabilities"] as const,
+  memories: (agentId: string) => ["agents", "memories", agentId] as const,
 };
+
+export type AgentMemoryItem = {
+  id: string;
+  agentId: string;
+  userId: string | null;
+  category: "fact" | "learning" | "preference" | "planning" | "critique";
+  content: string;
+  sourceContext: string | null;
+  confidence: number;
+  lastRecalledAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export function agentMemoriesQueryOptions(agentId: string) {
+  return queryOptions({
+    queryKey: agentKeys.memories(agentId),
+    queryFn: (): Promise<AgentMemoryItem[]> =>
+      client(`/api/agents/${encodeURIComponent(agentId)}/memories`, "memories", {
+        fallback: "Could not load agent memories",
+      }),
+  });
+}
 
 /** What kinds of coworker this deployment can create. */
 export type AgentCapabilities = {

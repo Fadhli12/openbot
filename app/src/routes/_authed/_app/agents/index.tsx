@@ -1,9 +1,11 @@
+import { useState } from "react";
 import { IconPlus } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { z } from "zod";
 import { AgentCard } from "@/components/agents/agent-card";
 import { AgentDialog } from "@/components/agents/agent-dialog";
+import { AgentCloneDialog } from "@/components/agents/agent-clone-dialog";
 import { CreateAgentDialog } from "@/components/agents/create-agent-dialog";
 import { SidebarToggleBar } from "@/components/layout/sidebar-toggle";
 import { StaggerItem } from "@/components/layout/stagger";
@@ -68,15 +70,17 @@ function AgentsScreen() {
   const mine = agents?.filter((a) => a.mine);
   const explore = agents?.filter(isSharedWithYou);
 
+  const [cloningAgent, setCloningAgent] = useState<any>(null);
+
   // Creating wins if both are somehow set: it is the more recent intent.
   const showCreate = isCreating === true;
   const showProfile = !showCreate && selectedAgentId !== undefined;
   const close = () => navigate({ search: {} });
 
   return (
-    <>
+    <div className="min-h-0 flex-1 overflow-y-auto">
       <SidebarToggleBar />
-      <div className="max-w-2xl px-4 w-full mx-auto">
+      <div className="max-w-2xl px-4 w-full mx-auto pb-16">
         <div className="mt-12 w-full max-w-2xl">
           <div className="flex flex-row w-full items-center justify-between">
             <h2 className="font-bold text-lg">Your agents</h2>
@@ -106,7 +110,10 @@ function AgentsScreen() {
                 return (
                   <StaggerItem index={index} key={agent.id}>
                     <Link to="/agents" search={{ agent: agent.id }}>
-                      <AgentCard agent={agent} />
+                      <AgentCard
+                        agent={agent}
+                        onClone={(target) => setCloningAgent(target)}
+                      />
                     </Link>
                   </StaggerItem>
                 );
@@ -156,7 +163,10 @@ function AgentsScreen() {
                 return (
                   <StaggerItem index={index} key={agent.id}>
                     <Link to="/agents" search={{ agent: agent.id }}>
-                      <AgentCard agent={agent} />
+                      <AgentCard
+                        agent={agent}
+                        onClone={(target) => setCloningAgent(target)}
+                      />
                     </Link>
                   </StaggerItem>
                 );
@@ -203,6 +213,11 @@ function AgentsScreen() {
         onClose={close}
         open={showProfile}
       />
-    </>
+      <AgentCloneDialog
+        sourceAgent={cloningAgent}
+        open={cloningAgent !== null}
+        onClose={() => setCloningAgent(null)}
+      />
+    </div>
   );
 }

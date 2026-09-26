@@ -1533,35 +1533,59 @@ class BuiltInAgentWithSaneHistory extends BuiltInAgent {
     );
     const history = sanitizeSeededHistory(input.messages, answeredByResume);
 
-    // Extract dynamic model override if present in message content or directives (latest takes precedence)
+    // Extract dynamic model override and Grok mode directives (latest takes precedence)
     let agentToRun: BuiltInAgentWithSaneHistory = this;
+    let thinkingDirective = "";
+    let funDirective = "";
+    let modelOverride: string | null = null;
+
     for (const msg of [...history].reverse()) {
       if (typeof msg.content === "string") {
         const match = msg.content.match(/\[model:([^\]]+)\]/i);
-        if (match) {
-          const modelId = match[1].trim();
-          const newConfig: BuiltInAgentConfiguration = {
-            ...this.configuration,
-            model: `openai/${modelId}`,
-          };
-          agentToRun = new BuiltInAgentWithSaneHistory(
-            newConfig,
-            this.loadAttachment,
-            this.markAttachmentsSent,
-          );
-          break;
+        if (match && !modelOverride) {
+          modelOverride = match[1].trim();
+        }
+        if (!thinkingDirective && (/\[mode:thinking\]|\[reasoning:high\]/i.test(msg.content))) {
+          thinkingDirective =
+            "\n\n[DEEP THINKING & REASONING MODE: ON]\nTake extra deliberation to rigorously reason through this request from first principles. Consider counter-arguments, explore non-obvious edge cases, and present a profoundly structured, deeply analytical resolution.";
+        }
+        if (!funDirective && (/\[mode:fun\]|\[grok:fun\]/i.test(msg.content))) {
+          funDirective =
+            "\n\n[GROK FUN & WITTY MODE: ON]\nAnswer in Grok's iconic Fun Mode: be witty, playfully irreverent, humorously sharp, and refreshingly candid while maintaining stellar factual and technical accuracy.";
         }
       }
     }
 
+    if (modelOverride) {
+      const newConfig: BuiltInAgentConfiguration = {
+        ...this.configuration,
+        model: `openai/${modelOverride}`,
+      };
+      agentToRun = new BuiltInAgentWithSaneHistory(
+        newConfig,
+        this.loadAttachment,
+        this.markAttachmentsSent,
+      );
+    }
+
+    const effectiveHistory = [...history];
+    if (thinkingDirective || funDirective) {
+      const directiveMsg: Message = {
+        id: `mode-dir-${randomUUID()}`,
+        role: "user",
+        content: `${thinkingDirective}${funDirective}`,
+      };
+      effectiveHistory.push(directiveMsg);
+    }
+
     const load = this.loadAttachment;
     if (!load)
-      return observeModelConnection(agentToRun.superRun({ ...input, messages: history }));
+      return observeModelConnection(agentToRun.superRun({ ...input, messages: effectiveHistory }));
 
     return defer(() =>
       from(
         inlineAttachments(
-          history,
+          effectiveHistory,
           load,
           input.threadId,
           this.markAttachmentsSent,
@@ -1787,8 +1811,11 @@ class GroupRoundRobinAgent extends AbstractAgent {
         const roundsMatch = channelTopic.match(/\[rounds:(\d+)\]/);
         const totalRounds = roundsMatch ? Math.max(1, parseInt(roundsMatch[1], 10)) : 1;
         
-        const modeMatch = channelTopic.match(/\[mode:(collaborative|debate|brainstorm)\]/i);
+        const modeMatch = channelTopic.match(/\[mode:(collaborative|debate|brainstorm|planning)\]/i);
         const collaborationMode = modeMatch ? modeMatch[1].toLowerCase() : "collaborative";
+
+        const coordinatorMatch = channelTopic.match(/\[coordinator:([^\]]+)\]/i);
+        const designatedCoordinator = coordinatorMatch ? coordinatorMatch[1].trim() : null;
 
         const modelMatch = channelTopic.match(/\[model:([^\]]+)\]/i);
         const channelModel = modelMatch ? modelMatch[1].trim() : null;
@@ -1808,6 +1835,7 @@ class GroupRoundRobinAgent extends AbstractAgent {
         channelTopic = channelTopic
           .replace(/\s*\[rounds:\d+\]\s*/gi, "")
           .replace(/\s*\[mode:[^\]]+\]\s*/gi, "")
+          .replace(/\s*\[coordinator:[^\]]+\]\s*/gi, "")
           .replace(/\s*\[model:[^\]]+\]\s*/gi, "")
           .replace(/\s*\[agent_model:[^\]]+\]\s*/gi, "")
           .replace(/\s*\[role:[^\]]+\]\s*/gi, "")
@@ -1961,21 +1989,33 @@ class GroupRoundRobinAgent extends AbstractAgent {
           }
         }
 
-        // Synthesis turn: if multiple speakers, synthesize consensus
+        // Synthesis turn: if multiple speakers, synthesize consensus or coordinator briefing
         if (activeSpeakers.length > 1 && !isAborted) {
-          const synthesizer = this.agentMap[activeSpeakers[0]];
+          const coordinatorId =
+            (designatedCoordinator && this.agentMap[designatedCoordinator]
+              ? designatedCoordinator
+              : null) || activeSpeakers[0];
+          const synthesizer = this.agentMap[coordinatorId];
           if (synthesizer) {
             this.activeInner = synthesizer;
             const synthMsgId = `msg-${randomUUID()}`;
+            const coordName = coordinatorId
+              .replace(/[-_]/g, " ")
+              .replace(/\b\w/g, (c) => c.toUpperCase());
 
             subscriber.next({
               type: EventType.TEXT_MESSAGE_START,
               messageId: synthMsgId,
               role: "assistant",
-              name: activeSpeakers[0],
+              name: coordinatorId,
             });
 
-            const synthBadgeHeader = `### 🤖 **Consensus & Synthesis**\n\n`;
+            const synthBadgeHeader =
+              collaborationMode === "planning"
+                ? `### 📋 **Master Action Plan (${coordName})**\n\n`
+                : designatedCoordinator
+                  ? `### 👑 **Executive Synthesis (${coordName})**\n\n`
+                  : `### 🤖 **Consensus & Synthesis**\n\n`;
             subscriber.next({
               type: EventType.TEXT_MESSAGE_CONTENT,
               messageId: synthMsgId,
@@ -2418,6 +2458,7 @@ class IntelligenceKnowingANewThread extends CopilotKitIntelligence {
   private threadMessagesCache = new Map<string, { data: any; timestamp: number }>();
   // 24 hours TTL for server thread cache
   private CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+  private lastRunIdByThread = new Map<string, string>();
 
   override async getThreadMessages(
     params: Parameters<CopilotKitIntelligence["getThreadMessages"]>[0],
@@ -2452,6 +2493,67 @@ class IntelligenceKnowingANewThread extends CopilotKitIntelligence {
       this.threadMessagesCache.set(key, { data: result, timestamp: Date.now() });
     }
     return result;
+  }
+
+  override async ɵacquireThreadLock(
+    params: Parameters<CopilotKitIntelligence["ɵacquireThreadLock"]>[0],
+  ) {
+    try {
+      const res = await super.ɵacquireThreadLock(params);
+      this.lastRunIdByThread.set(params.threadId, params.runId);
+      return res;
+    } catch (err: any) {
+      if (err?.status === 409) {
+        // Auto-heal 409 stale lock from previous or interrupted run
+        const previousRunId = this.lastRunIdByThread.get(params.threadId);
+        if (previousRunId) {
+          await super.ɵcleanupThreadLock({
+            threadId: params.threadId,
+            runId: previousRunId,
+          }).catch(() => {});
+        }
+
+        try {
+          const eventsRes = await fetch(
+            `https://api.intelligence.copilotkit.ai/api/_inspect/threads/${encodeURIComponent(params.threadId)}/events`,
+            {
+              headers: {
+                Authorization: `Bearer ${process.env.INTELLIGENCE_API_KEY || ""}`,
+              },
+            },
+          );
+          if (eventsRes.ok) {
+            const data: any = await eventsRes.json();
+            const staleRunIds = [
+              ...new Set(
+                (data.events || [])
+                  .map((e: any) => e.runId || e.run_id)
+                  .filter(Boolean),
+              ),
+            ] as string[];
+            for (const staleId of staleRunIds.slice(-5)) {
+              await super.ɵcleanupThreadLock({
+                threadId: params.threadId,
+                runId: staleId,
+              }).catch(() => {});
+            }
+          }
+        } catch {}
+
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        const retried = await super.ɵacquireThreadLock(params);
+        this.lastRunIdByThread.set(params.threadId, params.runId);
+        return retried;
+      }
+      throw err;
+    }
+  }
+
+  override async ɵcleanupThreadLock(
+    params: Parameters<CopilotKitIntelligence["ɵcleanupThreadLock"]>[0],
+  ) {
+    this.lastRunIdByThread.delete(params.threadId);
+    return super.ɵcleanupThreadLock(params);
   }
 
   invalidateThreadCache(threadId: string): void {

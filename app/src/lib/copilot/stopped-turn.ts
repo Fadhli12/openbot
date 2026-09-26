@@ -29,6 +29,11 @@ export function stoppedReason(reported: unknown): string {
       : typeof reported === "string"
         ? reported
         : "";
+
+  if (said.includes("agent_thread_locked") || said.includes("is locked")) {
+    return "This thread is momentarily busy or processing a previous run. Retrying automatically...";
+  }
+
   return said.trim() || "The Bot stopped without saying why.";
 }
 

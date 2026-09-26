@@ -297,3 +297,96 @@ skills:
       4. State & Side Effects: Verify that state changes, database records, and event emissions occur accurately.
       Provide realistic test code examples (using Bun test, Jest, PyTest, or PHPUnit as appropriate for the stack).
     tools: []
+
+  - slug: sales-research
+    title: Research prospects and accounts
+    summary: Research target companies, decision-makers, tech stack, and pain points for outbound sales.
+    instructions: >-
+      Research the target company or lead profile comprehensively:
+      1. Company overview: Industry, estimated size, business model, and recent news or milestones.
+      2. Decision-maker identification: Key roles relevant to the offering (e.g. VP Engineering, Head of Ops).
+      3. Tech stack & integration points: Public tech signals, job postings, and tooling.
+      4. Value proposition alignment: Match specific product capabilities to likely operational challenges.
+      Present findings in a structured sales briefing ready for outreach campaign drafting.
+    tools: []
+
+  - slug: outbound-drafting
+    title: Draft high-conversion outbound messaging
+    summary: Draft personalized, concise, and value-focused sales emails or LinkedIn messages.
+    instructions: >-
+      Draft high-impact outbound sales copy:
+      1. Hook: Personalized opening referencing a specific company event, hire, or technology use.
+      2. Problem statement: Direct observation of an operational inefficiency or growth opportunity.
+      3. Solution & proof: One sentence describing how our solution addresses it, citing a brief metric or peer example.
+      4. Soft call to action: Low-friction ask (e.g. "open to a 10-minute preview next Tuesday?").
+      Rule: Never execute send actions directly. Stage the draft clearly in a preview block for human approval.
+    tools: []
+
+  - slug: candidate-sourcing
+    title: Source and screen candidate profiles
+    summary: Source candidate credentials, evaluate skills fit, and summarize candidate strengths.
+    instructions: >-
+      Evaluate candidate profiles against job specifications:
+      1. Role requirement mapping: Cross-check years of experience, core technical stack, and domain background.
+      2. Signal evaluation: Review code repositories, technical publications, project complexity, and career progression.
+      3. Cultural & craft assessment: Highlight evidence of ownership, architectural depth, and collaboration.
+      4. Summary scorecard: Produce a structured scorecard with Strengths, Gaps/Risks, and an overall Recommendation (Strong Yes, Yes, Leaning, Pass).
+    tools: []
+
+  - slug: inbox-triage
+    title: Triage and prioritize inbox messages
+    summary: Classify incoming communications by urgency, extract action items, and draft replies.
+    instructions: >-
+      Triage incoming email or communication batch:
+      1. Urgency classification: Tag each thread as [P0 Urgent: Action Needed], [P1 Review Required], [P2 FYI / Low Priority], or [P3 Automated / Newsletter].
+      2. Thread synthesis: Summarize the conversation history and current status in 2-3 bullet points.
+      3. Action items & deadline: Detail who owes what by when.
+      4. Draft response: Draft an articulate, professional response. Never send automatically; stage for human approval.
+    tools: []
+
+  - slug: invoice-parser
+    title: Extract invoice and billing metadata
+    summary: Extract vendor name, invoice ID, line items, taxes, due dates, and payment instructions.
+    instructions: >-
+      Extract financial parameters from invoice documents or portal receipts:
+      1. Vendor & Entity: Vendor company name, address, tax ID/EIN, and billing recipient.
+      2. Identification & Dates: Invoice number, issue date, payment due date, and terms (Net 30, due upon receipt).
+      3. Financial Breakdown: Subtotal, itemized line items with quantities and unit prices, taxes, and total payable amount.
+      4. Payment Instructions: Bank transfer details, ACH routing, or payment portal link.
+      Format the extraction as clean JSON and a markdown summary table for accounting ledger reconciliation.
+    tools: []
+
+  - slug: account-digest
+    title: Customer account health digest
+    summary: Analyze account health, track product adoption, and detect churn warning signals.
+    instructions: >-
+      Synthesize an account health assessment:
+      1. Account Overview: Tier, ARR, tenure, key stakeholders, and primary use cases.
+      2. Health & Engagement Score: Evaluate recent activity, ticket frequency, resolution sentiment, and feature utilization.
+      3. Churn Indicators: Flag lack of executive sponsor contact, dropped usage, unresolved blocker tickets, or renewal dates <90 days.
+      4. Recommended Interventions: Specific proactive steps (e.g. schedule executive check-in, offer technical enablement session).
+    tools: []
+
+  - slug: bug-reproduction-protocol
+    title: Reproduce web app bugs and log diagnostics
+    summary: Execute systematic steps to reproduce a defect, capturing console errors and DOM states.
+    instructions: >-
+      Reproduce a reported web bug systematically:
+      1. Environment baseline: Note browser, screen dimensions, user role, and test URL.
+      2. Step-by-step reproduction: Execute discrete user actions (clicks, inputs, navigations) in sequence.
+      3. Evidence capture: Record visual screenshot, DOM element states, console error logs, and failing HTTP network responses.
+      4. Root cause hypothesis: Compare expected vs actual behavior and identify likely failing component or API failure.
+      5. Issue report: Output a formatted GitHub / Linear issue with clear repro steps, expected vs actual behavior, and error logs.
+    tools: []
+
+  - slug: competitor-monitor
+    title: Monitor competitor updates and market shifts
+    summary: Detect changes in competitor websites, pricing models, feature tiers, and product announcements.
+    instructions: >-
+      Perform competitive intelligence audit:
+      1. Target baseline: Compare current target page state with previously known baseline.
+      2. Messaging changes: Highlight positioning pivots, new target buyer personas, or updated slogans.
+      3. Pricing & packaging shifts: Note price adjustments, new tiers, changed usage limits, or hidden fees.
+      4. Feature launches: Detail newly released tools, integrations, or documented roadmaps.
+      5. Strategic takeaway: What does this move imply for our product strategy and customer messaging?
+    tools: []

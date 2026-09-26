@@ -61,3 +61,18 @@
   font-weight: 600 !important;
   letter-spacing: -0.01em;
 }
+
+[data-openbot-a2ui="Icon"] {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: visible !important;
+  margin-right: 0.5rem;
+}
+
+[data-openbot-a2ui="Row"] > div {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+}

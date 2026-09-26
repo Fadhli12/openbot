@@ -4,13 +4,21 @@ import {
   useRenderActivityMessage,
   useRenderToolCall,
 } from "@copilotkit/react-core/v2";
+import { SaveRoutineDialog } from "@/components/routines/save-routine-dialog";
+import { ActionApprovalCard } from "@/components/channels/action-approval-card";
+import { SpeechPlaybackButton } from "@/components/channels/speech-playback-button";
+import { ThinkingProcessCard } from "@/components/channels/thinking-process-card";
+import { VisualChartCard, type ChartData } from "@/components/channels/visual-chart-card";
 import {
   IconAlertTriangle,
+  IconArrowRight,
+  IconArrowsExchange,
   IconBox,
   IconCheck,
   IconClock,
   IconCopy,
   IconFile,
+  IconSparkles,
   IconX,
 } from "@tabler/icons-react";
 import { motion, useReducedMotion } from "motion/react";
@@ -559,14 +567,19 @@ const TranscriptMessage = memo(function TranscriptMessage({
   delay,
   role,
   text,
+  agentName = "general-assistant",
+  threadId = "",
 }: {
   commandNames?: string;
   delay: number;
   role: "user" | "assistant";
   text: string;
+  agentName?: string;
+  threadId?: string;
 }) {
   const isUser = role === "user";
   const [copied, setCopied] = useState(false);
+  const [showRoutineModal, setShowRoutineModal] = useState(false);
   const firing = isUser ? readFiring(text) : null;
   if (firing !== null) {
     return (
@@ -594,6 +607,31 @@ const TranscriptMessage = memo(function TranscriptMessage({
       cleanText = text.slice(match[0].length);
     }
   }
+
+  // Parse thinking blocks if present (<think>...</think> or [THOUGHT]...[/THOUGHT])
+  let thinkingContent: string | null = null;
+  const thinkMatch = cleanText.match(/<think>([\s\S]*?)<\/think>/i) || cleanText.match(/\[THOUGHT\]([\s\S]*?)\[\/THOUGHT\]/i);
+  if (thinkMatch) {
+    thinkingContent = thinkMatch[1];
+    cleanText = cleanText.replace(thinkMatch[0], "").trim();
+  }
+
+  // Parse chart data blocks if present: ```chart ... ```
+  let parsedChart: ChartData | null = null;
+  const chartMatch = cleanText.match(/```chart\s*([\s\S]*?)```/i);
+  if (chartMatch) {
+    try {
+      parsedChart = JSON.parse(chartMatch[1]);
+      cleanText = cleanText.replace(chartMatch[0], "").trim();
+    } catch {}
+  }
+
+  const isApprovalRequired =
+    !isUser &&
+    (text.includes("[APPROVAL REQUIRED]") ||
+      text.includes("Approval Required:") ||
+      text.includes("please confirm to proceed") ||
+      text.includes("waiting for your confirmation"));
 
   const handleCopy = () => {
     void navigator.clipboard.writeText(cleanText);
@@ -639,25 +677,70 @@ const TranscriptMessage = memo(function TranscriptMessage({
                 </span>
               ) : (
                 <div className="relative group/bubble-text">
+                  {thinkingContent && <ThinkingProcessCard thought={thinkingContent} />}
+                  {parsedChart && <VisualChartCard chart={parsedChart} />}
                   <Streamdown components={markdownComponents}>{cleanText}</Streamdown>
-                  <button
-                    type="button"
-                    onClick={handleCopy}
-                    className="absolute top-0 right-0 opacity-0 group-hover/bubble-text:opacity-100 transition-opacity p-1 rounded-md bg-muted/80 hover:bg-muted text-muted-foreground hover:text-foreground text-xs flex items-center gap-1"
-                    title="Copy message"
-                  >
-                    {copied ? (
-                      <>
-                        <IconCheck className="size-3 text-emerald-500" />
-                        <span className="text-[10px] text-emerald-500">Copied</span>
-                      </>
-                    ) : (
-                      <>
-                        <IconCopy className="size-3" />
-                        <span className="text-[10px]">Copy</span>
-                      </>
-                    )}
-                  </button>
+                  <div className="absolute top-0 right-0 opacity-0 group-hover/bubble-text:opacity-100 transition-opacity flex items-center gap-1">
+                    <SpeechPlaybackButton text={cleanText} />
+                    <button
+                      type="button"
+                      onClick={() => setShowRoutineModal(true)}
+                      className="p-1 rounded-md bg-muted/80 hover:bg-muted text-muted-foreground hover:text-foreground text-xs flex items-center gap-1"
+                      title="Save this workflow as a routine"
+                    >
+                      <IconClock className="size-3" />
+                      <span className="text-[10px]">Routine</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCopy}
+                      className="p-1 rounded-md bg-muted/80 hover:bg-muted text-muted-foreground hover:text-foreground text-xs flex items-center gap-1"
+                      title="Copy message"
+                    >
+                      {copied ? (
+                        <>
+                          <IconCheck className="size-3 text-emerald-500" />
+                          <span className="text-[10px] text-emerald-500">Copied</span>
+                        </>
+                      ) : (
+                        <>
+                          <IconCopy className="size-3" />
+                          <span className="text-[10px]">Copy</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  {showRoutineModal && (
+                    <SaveRoutineDialog
+                      open={showRoutineModal}
+                      onClose={() => setShowRoutineModal(false)}
+                      agentId={agentName || "general-assistant"}
+                      channelId={threadId}
+                      defaultInstruction={cleanText.slice(0, 150)}
+                    />
+                  )}
+                  {isApprovalRequired && (
+                    <ActionApprovalCard
+                      actionSummary={cleanText.slice(0, 180)}
+                      onApprove={() => {
+                        window.dispatchEvent(
+                          new CustomEvent("openbot-send-user-message", {
+                            detail: { text: "Yes, approved. Proceed with execution." },
+                          }),
+                        );
+                      }}
+                      onReject={() => {
+                        window.dispatchEvent(
+                          new CustomEvent("openbot-send-user-message", {
+                            detail: { text: "No, action rejected. Stop this operation." },
+                          }),
+                        );
+                      }}
+                      onTakeControl={() => {
+                        window.dispatchEvent(new CustomEvent("openbot-take-the-wheel"));
+                      }}
+                    />
+                  )}
                 </div>
               )}
             </BubbleContent>

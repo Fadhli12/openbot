@@ -1,4 +1,6 @@
 import * as builtinRoutines from "./builtin-routines";
+import * as builtinSearch from "./builtin-search";
+import * as builtinCode from "./builtin-code";
 import * as composio from "./composio";
 import * as driveRest from "./google-drive-rest";
 import type { ListedTool, McpCallResult } from "./mcp";
@@ -119,6 +121,8 @@ export type TransportKind =
   | "mcp"
   | "google-drive-rest"
   | "builtin-routines"
+  | "builtin-search"
+  | "builtin-code"
   | "composio";
 
 /**
@@ -144,6 +148,8 @@ const TRANSPORTS: Record<TransportKind, VendorTransport> = {
   mcp,
   "google-drive-rest": driveRest,
   "builtin-routines": builtinRoutines,
+  "builtin-search": builtinSearch,
+  "builtin-code": builtinCode,
   composio,
 };
 

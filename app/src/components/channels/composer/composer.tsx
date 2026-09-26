@@ -52,6 +52,8 @@ import {
 } from "./draft";
 import { screenPickedFiles } from "./picked-files";
 import { AttachmentStrip } from "./attachment-strip";
+import { VoiceInputButton } from "./voice-input-button";
+import { IconBrain, IconMoodSmile } from "@tabler/icons-react";
 import { type RejectedFile, RejectedFiles } from "./rejected-files";
 import { PLACEHOLDER_COMMANDS } from "./sources";
 import { type AgentOption, buildTriggers } from "./triggers";
@@ -330,6 +332,11 @@ export function Composer({
   const [value, setValue] = useState<Segment[]>(
     initialValue ? [{ type: "text", text: initialValue }] : [],
   );
+  const [thinkingMode, setThinkingMode] = useState(false);
+  const [funMode, setFunMode] = useState(false);
+
+  const toggleThinking = () => setThinkingMode((prev) => !prev);
+  const toggleFun = () => setFunMode((prev) => !prev);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const submitInFlight = useRef(false);
   const promptAreaRef = useRef<PromptAreaHandle>(null);
@@ -1091,6 +1098,12 @@ export function Composer({
       // function through prompt-area's own `onSubmit`, which has never looked at `canSend`. A gate
       // drawn on the button alone would refuse the press and accept the keystroke.
       const submitted = toDraft(segments, staged);
+      if (thinkingMode) {
+        submitted.text = `[mode:thinking] ${submitted.text}`;
+      }
+      if (funMode) {
+        submitted.text = `[mode:fun] ${submitted.text}`;
+      }
       if (!canSendDraft(submitted) || overCap(submitted) || disabled) {
         return;
       }
@@ -1562,7 +1575,37 @@ export function Composer({
             <div />
           )}
 
-          <div>
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              size="icon"
+              variant={thinkingMode ? "secondary" : "ghost"}
+              onClick={toggleThinking}
+              title={thinkingMode ? "Deep Thinking Mode: ON" : "Deep Thinking Mode: OFF"}
+              className={`size-8 rounded-full transition-all ${
+                thinkingMode ? "bg-purple-500/20 text-purple-400 ring-1 ring-purple-500/40" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <IconBrain className="size-4" />
+            </Button>
+            <Button
+              type="button"
+              size="icon"
+              variant={funMode ? "secondary" : "ghost"}
+              onClick={toggleFun}
+              title={funMode ? "Grok Fun Mode: ON" : "Grok Fun Mode: OFF"}
+              className={`size-8 rounded-full transition-all ${
+                funMode ? "bg-amber-500/20 text-amber-400 ring-1 ring-amber-500/40" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <IconMoodSmile className="size-4" />
+            </Button>
+            <VoiceInputButton
+              disabled={disabled}
+              onTranscript={(transcript) => {
+                setValue((curr) => [...curr, { type: "text", text: " " + transcript + " " }]);
+              }}
+            />
             {canStop ? (
               <Button
                 aria-label="Stop the Bot"

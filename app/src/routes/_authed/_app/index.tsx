@@ -40,9 +40,9 @@ function RouteComponent() {
   );
 
   return (
-    <>
+    <div className="min-h-0 flex-1 overflow-y-auto">
       <SidebarToggleBar />
-      <div className="flex-1 flex flex-col items-center justify-center w-full p-4 mt-8">
+      <div className="flex-1 flex flex-col items-center justify-center w-full p-4 mt-8 pb-16">
         <div className="flex flex-col items-center">
           <h2 className="text-sm uppercase text-muted-foreground font-medium tracking-tight text-center">
             {appConfig.brand.productName}
@@ -210,6 +210,6 @@ function RouteComponent() {
           )}
         </div>
       </div>
-    </>
+    </div>
   );
 }
