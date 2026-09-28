@@ -1760,6 +1760,7 @@ class GroupRoundRobinAgent extends AbstractAgent {
       description?: string;
       history: Message[];
     }>,
+    private readonly agentNames: Record<string, string> = {},
   ) {
     super({ agentId, description: "Group Round Robin Discussion" });
   }
@@ -1770,6 +1771,7 @@ class GroupRoundRobinAgent extends AbstractAgent {
       this.agentMap,
       this.agentId ?? "group-chat",
       this.loadChannelMeta,
+      this.agentNames,
     );
   }
 
@@ -1865,9 +1867,9 @@ class GroupRoundRobinAgent extends AbstractAgent {
 
             this.activeInner = agent;
             const msgId = `msg-${randomUUID()}`;
-            const formattedName = botId
-              .replace(/[-_]/g, " ")
-              .replace(/\b\w/g, (c) => c.toUpperCase());
+            const formattedName =
+              this.agentNames[botId] ||
+              botId.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
             subscriber.next({
               type: EventType.TEXT_MESSAGE_START,
@@ -1999,9 +2001,9 @@ class GroupRoundRobinAgent extends AbstractAgent {
           if (synthesizer) {
             this.activeInner = synthesizer;
             const synthMsgId = `msg-${randomUUID()}`;
-            const coordName = coordinatorId
-              .replace(/[-_]/g, " ")
-              .replace(/\b\w/g, (c) => c.toUpperCase());
+            const coordName =
+              this.agentNames[coordinatorId] ||
+              coordinatorId.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
             subscriber.next({
               type: EventType.TEXT_MESSAGE_START,
@@ -2105,12 +2107,13 @@ function withGroupRoundRobinProxy(
     description?: string;
     history: Message[];
   }>,
+  agentNames: Record<string, string> = {},
 ): Record<string, AbstractAgent> {
   const handler: ProxyHandler<Record<string, AbstractAgent>> = {
     get(target, prop) {
       if (typeof prop === "string" && prop.startsWith("group:")) {
         const ids = prop.slice("group:".length).split(",").filter(Boolean);
-        return new GroupRoundRobinAgent(ids, target, prop, loadChannelMeta);
+        return new GroupRoundRobinAgent(ids, target, prop, loadChannelMeta, agentNames);
       }
       return Reflect.get(target, prop);
     },
@@ -2124,7 +2127,7 @@ function withGroupRoundRobinProxy(
 
   const proxy = new Proxy(built, handler);
   if (onlyBotId && onlyBotId.startsWith("group:")) {
-    built[onlyBotId] = new GroupRoundRobinAgent(groupBotIds, built, onlyBotId, loadChannelMeta);
+    built[onlyBotId] = new GroupRoundRobinAgent(groupBotIds, built, onlyBotId, loadChannelMeta, agentNames);
   }
   return proxy;
 }
@@ -2219,7 +2222,12 @@ export async function resolveRuntimeAgents(
     markAttachmentsSent,
   );
 
-  return withGroupRoundRobinProxy(built, groupBotIds, onlyBotId, loadChannelMeta);
+  const agentNames: Record<string, string> = {};
+  for (const a of all) {
+    agentNames[a.id] = a.name;
+  }
+
+  return withGroupRoundRobinProxy(built, groupBotIds, onlyBotId, loadChannelMeta, agentNames);
 }
 
 /** What one Bot may call, for the person whose request this is. */
